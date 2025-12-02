@@ -1,7 +1,7 @@
 services:
 
-  db:
-    container_name: ${CONTAINER_NAME_DB:-postgresql_db}
+  group1_db:
+    container_name: ${CONTAINER_NAME_DB:-group1_postgresql_db}
     image: postgres:17
     restart: always
     ports:
@@ -11,29 +11,28 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=${DB_NAME}
     healthcheck:
-        test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]  # Healthcheck for PostgreSQL
-        interval: 60s
-        timeout: 10s
-        retries: 5
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
     volumes:
-      # Use named volume for cross-platform compatibility (fixes Windows permission issues)
-      - postgres_data:/var/lib/postgresql/data 
-            
-  pgadmin:  
-    container_name: ${CONTAINER_NAME_PGADMIN:-pgadmin}
+      - ./postgres_data:/var/lib/postgresql/data
+
+  group1_pgadmin:  
+    container_name: ${CONTAINER_NAME_PGADMIN:-group1_pgadmin}
     image: dpage/pgadmin4
     environment:
       - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL}
       - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD}
     ports:
-      - 5050:80 # for local browser (80 is the default port of the browsed)
+      - 5050:80
     volumes:
-      - ./pgadmin_data:/var/lib/pgadmin  # Persisting pgAdmin configuration and sessions
+      - ./pgadmin_data:/var/lib/pgadmin
     depends_on: 
-      - db
+      - group1_db
 
-  etl:
-    container_name: ${CONTAINER_NAME_ETL:-university_etl}
+  group1_etl:
+    container_name: ${CONTAINER_NAME_ETL:-group1_university_etl}
     build:
       context: ./etl
       dockerfile: Dockerfile
@@ -44,31 +43,30 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
     depends_on: 
-      db:
+      group1_db:
         condition: service_healthy
     healthcheck:
       test: "exit 0"
 
-  api:
-    container_name: ${CONTAINER_NAME_API:-university_api}
+  group1_api:
+    container_name: ${CONTAINER_NAME_API:-group1_university_api}
     build:
       context: ./api
       dockerfile: Dockerfile
-    # command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; uvicorn main:app --host 0.0.0.0'
     volumes:
       - ./api:/api
-      - ./etl:/etl  # Mount ETL directory for database initialization
+      - ./etl:/etl
+      - ./syllabi/syllabi.zip:/api/syllabi.zip:ro
     ports:
       - 8008:8000
     environment:
       - DATABASE_URL=${DATABASE_URL}
     depends_on:
-      db:
+      group1_db:
         condition: service_healthy
 
-  # Frontend service
-  app:
-    container_name: ${CONTAINER_NAME_APP:-university_app}
+  group1_app:
+    container_name: ${CONTAINER_NAME_APP:-group1_university_app}
     build:
       context: ./app
       dockerfile: Dockerfile
@@ -77,11 +75,10 @@ services:
     environment:
       - VITE_API_URL=http://localhost:8008
     depends_on:
-      - api
+      - group1_api
 
-  # Data Science Notebook service
-  notebook:
-    container_name: ${CONTAINER_NAME_NOTEBOOK:-university_notebook}
+  group1_notebook:
+    container_name: ${CONTAINER_NAME_NOTEBOOK:-group1_university_notebook}
     build:
       context: ./notebook
       dockerfile: Dockerfile
@@ -93,7 +90,7 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
     depends_on:
-      db:
+      group1_db:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import socket; s=socket.socket(); s.connect((\"localhost\", 8888)); s.close()' || exit 1"]
