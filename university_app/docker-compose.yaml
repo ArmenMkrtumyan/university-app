@@ -33,7 +33,7 @@ services:
       - db
 
   etl:
-    container_name: ${CONTAINER_NAME_ETL:-university_etl}
+    container_name: ${CONTAINER_NAME_ETL:-group-3_etl}
     build:
       context: ./etl
       dockerfile: Dockerfile
@@ -50,7 +50,7 @@ services:
       test: "exit 0"
 
   api:
-    container_name: ${CONTAINER_NAME_API:-university_api}
+    container_name: ${CONTAINER_NAME_API:-group-3_api}
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -68,20 +68,20 @@ services:
 
   # Frontend service
   app:
-    container_name: ${CONTAINER_NAME_APP:-university_app}
+    container_name: ${CONTAINER_NAME_APP:-group-3_app}
     build:
       context: ./app
       dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8008}
     ports:
       - 5173:80
-    environment:
-      - VITE_API_URL=http://localhost:8008
     depends_on:
       - api
 
   # Data Science Notebook service
   notebook:
-    container_name: ${CONTAINER_NAME_NOTEBOOK:-university_notebook}
+    container_name: ${CONTAINER_NAME_NOTEBOOK:-group-3_notebook}
     build:
       context: ./notebook
       dockerfile: Dockerfile

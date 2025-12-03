@@ -33,9 +33,19 @@ If you need to change any values, edit the `.env` file in the `university_app/` 
 
 ### 3. Start All Services
 
+**On Mac/Linux:**
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
+
+**On Windows:**
+```cmd
+docker compose up -d --build
+```
+
+**Note:** This project is fully cross-platform compatible. All scripts work on both Mac and Windows:
+- Container scripts (run inside Docker) work on all platforms
+- Host scripts: Use `init_db.sh` on Mac/Linux, `init_db.bat` or `init_db.ps1` on Windows
 
 **That's it!** The database will be automatically initialized on first startup:
 - Database tables are created automatically
@@ -59,19 +69,21 @@ This will start:
 
 ## Common Commands
 
+All commands work on both Mac/Linux and Windows. Use `docker compose` (with space) for modern Docker Compose, or `docker-compose` (with hyphen) for older versions.
+
 ### Start services
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Stop services
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ### Access database via psql
 ```bash
-docker-compose exec db psql -U postgres -d university_db
+docker compose exec db psql -U postgres -d university_db
 ```
 
 ### Access pgAdmin
@@ -139,17 +151,38 @@ The Streamlit frontend provides:
 
 ### Regenerating Data
 
-If you need to regenerate or reload the database data:
+If you need to regenerate or reload the database data, you can use the initialization scripts:
 
+**On Mac/Linux:**
+```bash
+./init_db.sh
+```
+
+**On Windows (Command Prompt):**
+```cmd
+init_db.bat
+```
+
+**On Windows (PowerShell):**
+```powershell
+.\init_db.ps1
+```
+
+**Or manually:**
 ```bash
 # Option 1: Clear database and restart (recommended)
-docker-compose down
-rm -rf postgres_data/
-docker-compose up -d --build
+docker compose down -v
+docker compose up -d --build
 
 # Option 2: Manually run ETL
-docker-compose run --rm etl bash run_etl.sh
+docker compose run --rm etl bash run_etl.sh
 ```
+
+**Note:** The initialization scripts will:
+1. Stop all containers
+2. Remove the database volume (deletes all data)
+3. Start the database
+4. Run the ETL process to load fresh data
 
 ## Documentation
 
