@@ -1,5 +1,5 @@
 # Azure DevOps Pipeline Configuration
-# This pipeline automatically triggers when changes are pushed to the main branch on GitHub
+# This pipeline automatically triggers when changes are pushed to the main branch
 # It builds Docker images and deploys to Azure using FREE tier services
 
 trigger:
@@ -17,14 +17,15 @@ pool:
 
 variables:
   # Azure Container Registry (Free tier: 500MB storage, 10K pulls/day)
-  dockerRegistryServiceConnection: 'ACR-Connection'  # Create this service connection
+  ACR_NAME: 'universityApp'  # Your Azure Container Registry name
+  dockerRegistryServiceConnection: 'ACR-Connection'
   containerRegistry: '$(ACR_NAME).azurecr.io'
   imageRepository: 'university-app'
   
-  # Azure App Service names (Free tier F1 available)
-  # Change these to match your App Service names in Azure
-  apiAppName: 'university-app-api'
-  frontendAppName: 'university-app-frontend'
+  # Azure App Service names (Free tier F1)
+  # These match your actual App Service names in Azure
+  apiAppName: 'api-armen-2025'
+  frontendAppName: 'api-frontend-armen'
   
   # Image tags
   dockerfilePath: '$(Build.SourcesDirectory)/university_app'
@@ -38,7 +39,7 @@ stages:
         displayName: 'Build and Push Images'
         steps:
           - checkout: self
-            displayName: 'Checkout code from GitHub'
+            displayName: 'Checkout code from Azure DevOps'
             fetchDepth: 1
 
           - script: |
@@ -73,9 +74,6 @@ stages:
                 $(tag)
                 latest
               arguments: '--build-arg VITE_API_URL=https://$(apiAppName).azurewebsites.net'
-            
-            # Note: If VITE_API_URL needs to be set at runtime, remove the build arg above
-            # and set it as an environment variable in the App Service instead
 
   - stage: Deploy
     displayName: 'Deploy to Azure (Free Tier)'
@@ -84,7 +82,7 @@ stages:
     jobs:
       - deployment: DeployToAzure
         displayName: 'Deploy Application to Azure'
-        environment: 'production'  # Create this environment in Azure DevOps
+        environment: 'production'
         strategy:
           runOnce:
             deploy:
@@ -93,7 +91,7 @@ stages:
                 - task: AzureWebAppContainer@1
                   displayName: 'Deploy API to Azure App Service'
                   inputs:
-                    azureSubscription: 'Azure-Subscription'  # Create this service connection
+                    azureSubscription: 'Azure-Subscription'
                     appName: '$(apiAppName)'
                     containers: '$(containerRegistry)/$(imageRepository)-api:$(tag)'
                     appSettings: |
@@ -117,3 +115,4 @@ stages:
                     echo "API URL: https://$(apiAppName).azurewebsites.net"
                     echo "API Docs: https://$(apiAppName).azurewebsites.net/docs"
                   displayName: 'Display Deployment URLs'
+
