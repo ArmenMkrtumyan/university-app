@@ -121,10 +121,33 @@ def initialize_database():
                 env={**os.environ, "PYTHONPATH": f"{etl_path}:{etl_path}/Database"}
             )
             if result2.returncode != 0:
-                logger.error(f"Data loading failed: {result2.stderr}")
-                logger.error(f"Output: {result2.stdout}")
+                logger.error(f"❌ Data loading failed with return code {result2.returncode}")
+                logger.error(f"STDERR:\n{result2.stderr}")
+                logger.error(f"STDOUT:\n{result2.stdout}")
+                # Also check for specific table loading issues
+                if "section_name" in result2.stderr or "section_name" in result2.stdout:
+                    logger.error("⚠️  section_name table loading issue detected!")
+                if "users" in result2.stderr or "users" in result2.stdout:
+                    logger.error("⚠️  users table loading issue detected!")
                 return False
             logger.info("Data loading completed successfully")
+            
+            # Verify critical tables were loaded
+            logger.info("Verifying critical tables were loaded...")
+            db = next(get_db())
+            try:
+                from Database.models import UserDB, SectionNameDB
+                user_count = db.query(UserDB).count()
+                section_name_count = db.query(SectionNameDB).count()
+                logger.info(f"Verification: users={user_count}, section_name={section_name_count}")
+                if user_count == 0:
+                    logger.warning("⚠️  WARNING: users table is empty after loading!")
+                if section_name_count == 0:
+                    logger.warning("⚠️  WARNING: section_name table is empty after loading!")
+            except Exception as e:
+                logger.warning(f"Could not verify table counts: {e}")
+            finally:
+                db.close()
             
             logger.info("Database initialization completed successfully!")
             return True
@@ -145,6 +168,7 @@ def initialize_database():
 def ensure_database_initialized():
     """
     Main function to ensure database is initialized. Always runs ETL to ensure database has data (will handle existing data gracefully).
+    The ETL process handles all table creation, schema checking, and data loading.
     
     Input:
         None
@@ -153,22 +177,19 @@ def ensure_database_initialized():
         bool: True if initialization successful, False otherwise.
     """
     logger.info("Ensuring database is initialized...")
+    logger.info("ETL will handle table creation, schema checking, and data loading...")
     
-    # First, ensure tables exist
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified.")
-    except Exception as e:
-        logger.error(f"Error creating tables: {e}")
-        return False
-    
-    # Always run ETL - it will handle existing data gracefully
+    # Run ETL - it will:
+    # 1. Check schema version and recreate tables if mismatched
+    # 2. Create all tables if they don't exist
+    # 3. Clear existing data
+    # 4. Load fresh data from CSV files
     logger.info("Running ETL to initialize/refresh database...")
     if initialize_database():
-        logger.info("Database initialization completed successfully via ETL.")
+        logger.info("✅ Database initialization completed successfully via ETL.")
         return True
     else:
-        logger.error("ETL initialization failed. Database may be incomplete.")
+        logger.error("❌ ETL initialization failed. Database may be incomplete.")
         logger.warning("To manually initialize database, run: docker compose run --rm etl bash run_etl.sh")
         return False
 
