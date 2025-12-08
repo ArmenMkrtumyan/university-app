@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { User, BookOpen, Calendar, BarChart3, LogOut } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -14,14 +14,6 @@ export default function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [activePage, setActivePage] = useState<Page>('about')
-  const [renderKey, setRenderKey] = useState(0)
-
-  // Force re-render when user changes to ensure all child components update
-  // This is especially important after login when user state is set
-  useEffect(() => {
-    // Increment render key when user changes to force all child components to remount
-    setRenderKey(prev => prev + 1)
-  }, [user])
 
   const handleLogout = () => {
     logout()
@@ -36,35 +28,30 @@ export default function Dashboard() {
   ]
 
   const renderPage = () => {
-    // Use renderKey to force remount when user changes
-    const componentKey = `${user?.student_id || 'no-user'}-${renderKey}`
-    
     switch (activePage) {
       case 'about':
-        // Key ensures AboutMe re-renders when user changes (e.g., after login)
-        return <AboutMe key={componentKey} />
+        return <AboutMe key={user?.student_id} />
       case 'classes':
-        return <Classes key={componentKey} />
+        return <Classes key={user?.student_id} />
       case 'schedule':
-        // Key ensures Schedule re-renders when user changes (e.g., after login)
-        return <Schedule key={componentKey} />
+        return <Schedule key={user?.student_id} />
       case 'statistics':
-        return <Statistics key={componentKey} />
+        return <Statistics key={user?.student_id} />
       default:
-        return <AboutMe key={componentKey} />
+        return <AboutMe key={user?.student_id} />
     }
   }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-[#1e3a5f] text-white flex flex-col">
+      <aside className="w-64 bg-[#1e3a5f] text-white flex flex-col sticky top-0 h-screen">
         <div className="p-6 border-b border-[#2a4a6f]">
           <h2 className="text-xl font-bold">Student Portal</h2>
           <p className="text-sm text-gray-300 mt-1">{user?.student_name || user?.username}</p>
         </div>
         
-        <nav className="flex-1 p-4">
+        <nav className="flex-1 p-4 overflow-y-auto">
           <ul className="space-y-2">
             {menuItems.map((item) => {
               const Icon = item.icon
@@ -88,7 +75,7 @@ export default function Dashboard() {
           </ul>
         </nav>
 
-        <div className="p-4 border-t border-[#2a4a6f]">
+        <div className="p-4 border-t border-[#2a4a6f] flex-shrink-0">
           <Button
             onClick={handleLogout}
             variant="outline"

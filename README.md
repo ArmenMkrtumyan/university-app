@@ -1,229 +1,79 @@
 # University Course Management System
 
-A full-stack application for managing university courses, students, and schedules.
+Full-stack application for managing university courses, students, and schedules.
 
 ## Architecture
 
 - **Frontend**: React + TypeScript (Vite)
-- **Streamlit Frontend**: Minimal Streamlit layer (Milestone 3 requirement)
 - **Backend**: FastAPI (Python)
 - **Database**: PostgreSQL
 - **ETL**: Python scripts for data generation and loading
-- **Documentation**: MkDocs with Material theme
-- **Containerization**: Docker & Docker Compose
+- **Documentation**: MkDocs
 
 ## Quick Start
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/DS-223-2025-Fall/group-3/tree/main
-cd group-3/university_app
-```
-
-### 2. Environment Variables
-
-The `.env` file is included in the repository with default configuration. You can use it as-is or modify it if needed:
-
-- **Database Configuration**: Default credentials are set
-- **Container Names**: Defaults are provided
-- **pgAdmin**: Default admin credentials
-
-If you need to change any values, edit the `.env` file in the `university_app/` directory.
-
-### 3. Start All Services
-
-**On Mac/Linux:**
-```bash
-docker compose up -d --build
-```
-
-**On Windows:**
-```cmd
-docker compose up -d --build
-```
-
-**Note:** This project is fully cross-platform compatible. All scripts work on both Mac and Windows:
-- Container scripts (run inside Docker) work on all platforms
-- Host scripts: Use `init_db.sh` on Mac/Linux, `init_db.bat` or `init_db.ps1` on Windows
-
-**That's it!** The database will be automatically initialized on first startup:
-- Database tables are created automatically
-- Data is generated and loaded automatically
-- All services will start once initialization is complete
-
-**Note:** The initialization only runs if the database is empty. If you need to regenerate data, see the "Regenerating Data" section below.
-
-This will start:
-- PostgreSQL database (port 5432)
-- pgAdmin (port 5050)
-- FastAPI backend (port 8008)
-- React frontend (port 5173)
-
-### 5. Access the Application
-
-- **React Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8008
-- **API Docs**: http://localhost:8008/docs
-- **pgAdmin**: http://localhost:5050
-
-## Common Commands
-
-All commands work on both Mac/Linux and Windows. Use `docker compose` (with space) for modern Docker Compose, or `docker-compose` (with hyphen) for older versions.
-
-### Start services
-```bash
-docker compose up -d
-```
-
-### Stop services
-```bash
-docker compose down
-```
-
-### Access database via psql
-```bash
-docker compose exec db psql -U postgres -d university_db
-```
-
-### Access pgAdmin
-- URL: http://localhost:5050
-- Email: admin@admin.com
-- Password: (from .env file)
-
-## How to Run Streamlit Frontend
-
-A minimal Streamlit frontend has been added to satisfy Milestone 3 requirements. This does **not** replace or modify the existing React frontend - both can run independently.
-
-### Prerequisites
-
-1. Ensure the API service is running (see "Quick Start" section above)
-2. Python 3.8+ installed
-3. Streamlit dependencies installed
-
-### Installation
-
-1. **Navigate to the Streamlit app directory:**
+1. **Clone and navigate:**
    ```bash
-   cd university_app/streamlit_app
+   git clone https://github.com/DS-223-2025-Fall/group-3
+   cd group-3/university_app/
    ```
 
-2. **Install dependencies:**
+2. **Start services:**
    ```bash
-   pip install -r requirements.txt
+   docker compose up -d --build
    ```
 
-   Or install globally:
-   ```bash
-   pip install streamlit requests pandas
-   ```
+3. **Access:**
+   - Frontend: http://localhost:5173
+   - API: http://localhost:8008
+   - API Docs: http://localhost:8008/docs
+   - pgAdmin: http://localhost:5050
+   - Documentation: http://127.0.0.1:8000
+     ```bash
+     # Install documentation dependencies (optional, for local development)
+     cd mkdocs && pip install -r requirements.txt
+     
+     # Serve documentation locally
+     cd mkdocs && python3 -m mkdocs serve
+     
+     # Build static documentation site
+     cd mkdocs && python3 -m mkdocs build
+     ```
 
-### Running the Streamlit App
+## Screenshots
 
-1. **Start the Streamlit app:**
-   ```bash
-   streamlit run app.py
-   ```
+### Frontend UI
 
-2. **Access the Streamlit frontend:**
-   - The app will automatically open in your browser at http://localhost:8501
-   - If it doesn't open automatically, navigate to the URL shown in the terminal
+#### About Me Page
+![About Me](images/About_Me.png)
 
-### Configuration
+#### Classes/Courses Page
+![Classes](images/Classes.png)
 
-The Streamlit app connects to the FastAPI backend at `http://localhost:8008` by default.
+#### Schedule Page
+![Schedule](images/Schedule.png)
 
-To use a different API URL, set the environment variable:
-```bash
-export STREAMLIT_API_URL=http://your-api-url:8008
-streamlit run app.py
-```
+#### Statistics Page
+![Statistics](images/Statistics.png)
 
-### Features
+### API Documentation (Swagger)
 
-The Streamlit frontend provides:
-- Course section browsing with filters (Year, Semester, Course Type, Search)
-- Course details display in table format
-- Expandable detailed view for each course
-- Uses only built-in Streamlit components (no third-party UI libraries)
+**Interactive API Documentation:** [http://localhost:8008/docs](http://localhost:8008/docs)
 
-**Note:** The Streamlit frontend is minimal and uses default Streamlit styling. The primary UI remains the React frontend, which is unchanged.
+*Access the full interactive Swagger UI documentation to explore all API endpoints, test requests, and view detailed schemas.*
 
-### Regenerating Data
+#### Swagger UI - Endpoint Groups
+![Swagger Endpoint Groups](images/Swagger_1_Endpoint_Groups.png)
 
-If you need to regenerate or reload the database data, you can use the initialization scripts:
+*The main Swagger UI page showing all API endpoints organized by tags (Authentication, Students, Courses, Recommendations, etc.). This provides an overview of all available endpoints grouped by functionality.*
 
-**On Mac/Linux:**
-```bash
-./init_db.sh
-```
+#### Expanded Endpoint Example
+![Swagger Expanded Endpoint](images/Swagger_2_Expanded_endpoint_look.png)
 
-**On Windows (Command Prompt):**
-```cmd
-init_db.bat
-```
+*An example of an expanded endpoint showing the detailed request/response schemas, parameters, and data models. This demonstrates the comprehensive API documentation available for each endpoint.*
 
-**On Windows (PowerShell):**
-```powershell
-.\init_db.ps1
-```
+#### Try It Out Feature
+![Swagger Try It Out](images/Swagger_3_Try_It_Out.png)
 
-**Or manually:**
-```bash
-# Option 1: Clear database and restart (recommended)
-docker compose down -v
-docker compose up -d --build
+*The interactive "Try it out" feature allows developers to test API endpoints directly from the Swagger UI.*
 
-# Option 2: Manually run ETL
-docker compose run --rm etl bash run_etl.sh
-```
-
-**Note:** The initialization scripts will:
-1. Stop all containers
-2. Remove the database volume (deletes all data)
-3. Start the database
-4. Run the ETL process to load fresh data
-
-## Documentation
-
-This project uses [MkDocs](https://www.mkdocs.org/) with the Material theme for documentation.
-
-### How to use
-
-1. **Install dependencies** (if not already installed):
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Serve documentation locally** (for development):
-   ```bash
-   mkdocs serve
-   ```
-   The documentation will be available at http://127.0.0.1:8000
-
-3. **Build the documentation**:
-   ```bash
-   mkdocs build
-   ```
-   This generates static HTML files in the `site/` directory.
-
-### Documentation Structure
-
-- **Configuration**: `mkdocs.yaml` - Main configuration file
-- **Source files**: `docs/` directory contains all markdown documentation files
-  - `docs/index.md` - Home page
-  - `docs/etl.md` - ETL documentation
-  - `docs/api.md` - API documentation
-  - `docs/app.md` - Frontend app documentation
-  - `docs/api_models.md` - API models documentation
-- **Build output**: `site/` directory (generated, not committed to git)
-
-### Editing Documentation
-
-Simply edit the markdown files in the `docs/` directory. The changes will be reflected when you rebuild or serve the documentation.
-
-## Notes
-
-- **ETL Service**: Commented out after initial data load to save resources. Uncomment only when needed.
-- **Data Persistence**: Database data is stored in `postgres_data/` volume and persists between restarts.
-- **Environment Variables**: The `.env` file is included in the repository for easy setup.

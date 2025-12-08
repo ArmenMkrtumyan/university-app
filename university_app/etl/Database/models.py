@@ -2,7 +2,7 @@
 Database models for the university ETL schema.
 """
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, text, inspect
 from sqlalchemy.sql import func
 from Database.database import Base, engine
 
@@ -135,7 +135,7 @@ class Takes(Base):
 
     student_id = Column(
         Integer, ForeignKey("students.student_id"), primary_key=True
-    )  # Fixed to match actual schema
+    )
     section_id = Column(Integer, ForeignKey("sections.id"), primary_key=True)
     status = Column(String(20))  # e.g., 'enrolled', 'completed', 'dropped'
     grade = Column(String(5), nullable=True)  # e.g., 'A', 'B+', 'F', 'P', 'NP'
@@ -201,7 +201,7 @@ class DraftSchedule(Base):
     student_id = Column(Integer, ForeignKey("students.student_id"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class DraftScheduleSection(Base):
@@ -231,7 +231,6 @@ class RecommendationResult(Base):
     recommended_section_id = Column(Integer, ForeignKey("sections.id"), nullable=False)
     time_slot = Column(Integer, ForeignKey("time_slots.time_slot_id"), nullable=True)
     
-    # Deprecated fields (kept for backward compatibility)
     course_name = Column(String(200), nullable=True)
     cluster = Column(String(200), nullable=True)
     credits = Column(Integer, nullable=True)
@@ -257,8 +256,6 @@ def check_schema_version():
     Check if database schema matches current models.
     Returns True if schema is up to date, False if recreation needed.
     """
-    from sqlalchemy import text, inspect
-    
     try:
         inspector = inspect(engine)
         existing_tables = inspector.get_table_names()
@@ -296,30 +293,67 @@ def check_schema_version():
 
 def drop_all_tables():
     """
-    Drop all tables in the database. Used for clean recreation.
+    Drop all ETL-managed tables in the database. Used for clean recreation.
+    Preserves user-generated tables: draft_schedules, draft_schedule_sections, recommendation_results
     """
-    from sqlalchemy import text, inspect
+    # ETL-managed tables (must match LOAD_ORDER in load_data_to_db.py)
+    ETL_TABLES = {
+        "users", "students", "locations", "instructors", "departments", 
+        "programs", "courses", "time_slots", "sections", "section_name",
+        "prerequisites", "takes", "works", "hascourse", "clusters", 
+        "course_cluster", "preferred"
+    }
     
-    print("⚠️  Dropping all existing tables for clean recreation...")
+    # User-generated tables to preserve (draft schedules are user-created and should persist)
+    # Note: recommendation_results are cleared separately in load_data_to_db.py 
+    # because they reference sections that may change
+    PRESERVE_TABLES = {
+        "draft_schedules", "draft_schedule_sections"
+    }
+    
+    # Orphaned/legacy tables to drop (no longer in codebase)
+    ORPHANED_TABLES = {
+        "ab_test_assignments", "ui_element_clicks"
+    }
+    
+    print("⚠️  Dropping ETL-managed tables for clean recreation...")
+    print("   Preserving user-generated tables: draft_schedules, draft_schedule_sections")
+    print("   Dropping orphaned tables: ab_test_assignments, ui_element_clicks")
     
     try:
         with engine.connect() as connection:
             # Disable foreign key checks temporarily
             connection.execute(text("SET session_replication_role = 'replica';"))
             
-            # Drop all tables
+            # Get all tables
             inspector = inspect(engine)
-            tables = inspector.get_table_names()
+            all_tables = inspector.get_table_names()
             
-            for table in tables:
-                print(f"   Dropping table: {table}")
-                connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+            # Drop ETL-managed tables and orphaned tables
+            dropped_count = 0
+            for table in all_tables:
+                # Normalize table name (handle case sensitivity)
+                table_lower = table.lower()
+                if table_lower in ETL_TABLES:
+                    print(f"   Dropping ETL table: {table}")
+                    connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                    dropped_count += 1
+                elif table_lower in ORPHANED_TABLES:
+                    print(f"   Dropping orphaned table: {table}")
+                    connection.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                    dropped_count += 1
+                elif table_lower in PRESERVE_TABLES:
+                    print(f"   Preserving user table: {table}")
+                else:
+                    # Unknown table - preserve it to be safe
+                    print(f"   Preserving unknown table: {table}")
             
             # Re-enable foreign key checks
             connection.execute(text("SET session_replication_role = 'origin';"))
             connection.commit()
             
-        print("✓ All tables dropped successfully")
+        print(f"✓ Dropped {dropped_count} ETL-managed tables successfully")
+        print("✓ User-generated tables preserved")
         return True
         
     except Exception as e:
@@ -329,13 +363,16 @@ def drop_all_tables():
 
 def create_tables():
     """
-    Description: Creates all database tables defined by the ORM models for ETL/testing.
+    Description:
+        Creates all database tables defined by the ORM models for ETL/testing.
     Automatically detects schema mismatches and recreates tables if needed.
-    inputs: None.
-    return: None. The function issues CREATE TABLE statements via SQLAlchemy metadata.
-    """
-    from sqlalchemy import text, inspect
     
+    Input:
+        None
+    
+    Output:
+        None (the function issues CREATE TABLE statements via SQLAlchemy metadata)
+    """
     print("=" * 60)
     print("Checking database schema...")
     print("=" * 60)

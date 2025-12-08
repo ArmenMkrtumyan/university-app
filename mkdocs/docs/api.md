@@ -6,25 +6,19 @@ The API component is a FastAPI-based backend service that provides REST endpoint
 
 ## Main Application
 
-::: api.main
-    options:
-        show_source: true
-
-## Database Models
-
-::: api.Database.models
+::: university_app.api.main
     options:
         show_source: true
 
 ## Database Configuration
 
-::: api.Database.database
+::: university_app.api.Database.database
     options:
         show_source: true
 
 ## Schema Definitions
 
-::: api.Database.schema
+::: university_app.api.Database.schema
     options:
         show_source: true
 

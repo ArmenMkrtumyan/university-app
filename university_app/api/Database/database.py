@@ -14,33 +14,36 @@ import os
 
 
 # Load environment variables from .env file
-load_dotenv(".env")
+# Try multiple locations: Docker mount, parent directory, current directory
+load_dotenv("/api/.env")     # Docker mount location
+load_dotenv("../.env")       # Parent directory (for local dev)
+load_dotenv()                # Current directory
 
-# Get the database URL from environment variables
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set. Please check your .env file.")
 
-# Create the SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
-
-# Base class for declarative models
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,      # Verify connections before using them
+    pool_recycle=3600,       # Recycle connections after 1 hour
+    pool_size=10,            # Connection pool size
+    max_overflow=20          # Max overflow connections
+)
 Base = declarative_base()
-
-# SessionLocal for database operations
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
     """
+    Description:
     Get a database session for dependency injection. Yields a database session and ensures it's closed after use.
     
     Input:
         None
     
-    Return:
-        Generator[Session]: Database session generator that yields a session.
+    Output:
+        Generator[Session]: Database session generator that yields a session
     """
     db = SessionLocal()
     try:

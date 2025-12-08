@@ -6,9 +6,6 @@ Provides data validation schemas for all API endpoints including student, course
 from pydantic import BaseModel
 from typing import Optional
 
-# Pydantic models for request and response validation
-
-# User Schemas
 class User(BaseModel):
     """Response schema for user"""
     user_id: int
@@ -25,7 +22,6 @@ class UserCreate(BaseModel):
     password: str
     student_id: Optional[int] = None
 
-# Student Schemas
 class Student(BaseModel):
     """Response schema for student"""
     student_id: int
@@ -42,7 +38,6 @@ class StudentCreate(BaseModel):
     credit: Optional[int] = None
     program_name: str
 
-# Location Schemas
 class Location(BaseModel):
     """Response schema for location"""
     room_id: int
@@ -55,7 +50,6 @@ class LocationCreate(BaseModel):
     """Request schema for creating a location"""
     building_room_name: str
 
-# Instructor Schemas
 class Instructor(BaseModel):
     """Response schema for instructor"""
     id: int
@@ -72,7 +66,6 @@ class InstructorCreate(BaseModel):
     bio_url: Optional[str] = None
     room_id: Optional[int] = None
 
-# Department Schemas
 class Department(BaseModel):
     """Response schema for department"""
     dept_name: str
@@ -86,7 +79,6 @@ class DepartmentCreate(BaseModel):
     dept_name: str
     roomID: Optional[int] = None
 
-# Program Schemas
 class Program(BaseModel):
     """Response schema for program"""
     prog_name: str
@@ -114,7 +106,6 @@ class CourseCreate(BaseModel):
     name: str
     credits: int
 
-# TimeSlot Schemas
 class TimeSlot(BaseModel):
     """Response schema for time slot"""
     time_slot_id: int
@@ -135,7 +126,6 @@ class TimeSlotCreate(BaseModel):
     year: int
     semester: str
 
-# Section Schemas
 class Section(BaseModel):
     """Response schema for section"""
     id: int
@@ -160,7 +150,6 @@ class SectionCreate(BaseModel):
     instructor_id: int
     syllabus_url: Optional[str] = None
 
-# SectionName Schemas
 class SectionName(BaseModel):
     """Response schema for section_name"""
     section_name: str
@@ -174,7 +163,6 @@ class SectionNameCreate(BaseModel):
     section_name: str
     section_id: int
 
-# Prerequisites Schemas
 class Prerequisites(BaseModel):
     """Response schema for prerequisites"""
     course_id: int
@@ -188,7 +176,6 @@ class PrerequisitesCreate(BaseModel):
     course_id: int
     prerequisite_id: int
 
-# Takes Schemas
 class Takes(BaseModel):
     """Response schema for takes (student enrollment)"""
     student_id: int
@@ -206,7 +193,6 @@ class TakesCreate(BaseModel):
     status: Optional[str] = None
     grade: Optional[str] = None
 
-# Works Schemas
 class Works(BaseModel):
     """Response schema for works (instructor-department relationship)"""
     instructorid: int
@@ -220,7 +206,6 @@ class WorksCreate(BaseModel):
     instructorid: int
     dept_name: str
 
-# HasCourse Schemas
 class HasCourse(BaseModel):
     """Response schema for hascourse (program-course relationship)"""
     prog_name: str
@@ -234,7 +219,6 @@ class HasCourseCreate(BaseModel):
     prog_name: str
     courseid: int
 
-# Cluster Schemas
 class Cluster(BaseModel):
     """Response schema for cluster"""
     cluster_id: int
@@ -249,7 +233,6 @@ class ClusterCreate(BaseModel):
     cluster_number: Optional[int] = None
     theme: Optional[str] = None
 
-# CourseCluster Schemas
 class CourseCluster(BaseModel):
     """Response schema for course_cluster"""
     course_id: int
@@ -263,7 +246,6 @@ class CourseClusterCreate(BaseModel):
     course_id: int
     cluster_id: int
 
-# Preferred Schemas
 class Preferred(BaseModel):
     """Response schema for preferred"""
     student_id: int
@@ -277,12 +259,11 @@ class PreferredCreate(BaseModel):
     student_id: int
     course_id: int
 
-# RecommendationResult Schemas
 class RecommendationResult(BaseModel):
     """Response schema for recommendation result"""
     id: int
     student_id: int
-    course_id: Optional[int] = None  # Deprecated: can be derived from section->course
+    course_id: Optional[int] = None
     recommended_section_id: int
     time_slot: Optional[int] = None
     recommendation_score: Optional[str] = None
@@ -290,12 +271,11 @@ class RecommendationResult(BaseModel):
     slot_number: Optional[int] = None
     model_version: Optional[str] = None
     time_preference: Optional[str] = None
-    semester: Optional[str] = None  # Kept for backward compatibility
-    year: Optional[int] = None  # Kept for backward compatibility
-    # Deprecated fields (kept for backward compatibility, can be derived from section->course)
-    course_name: Optional[str] = None  # Deprecated: can be derived from section->course
-    cluster: Optional[str] = None  # Deprecated: can be derived from course_cluster
-    credits: Optional[int] = None  # Deprecated: can be derived from course
+    semester: Optional[str] = None
+    year: Optional[int] = None
+    course_name: Optional[str] = None
+    cluster: Optional[str] = None
+    credits: Optional[int] = None
     created_at: str
     updated_at: Optional[str] = None
 
@@ -305,7 +285,7 @@ class RecommendationResult(BaseModel):
 class RecommendationResultCreate(BaseModel):
     """Request schema for creating a recommendation result"""
     student_id: int
-    course_id: Optional[int] = None  # Deprecated: can be derived from section->course
+    course_id: Optional[int] = None
     recommended_section_id: int
     time_slot: Optional[int] = None
     recommendation_score: Optional[str] = None
@@ -313,14 +293,12 @@ class RecommendationResultCreate(BaseModel):
     slot_number: Optional[int] = None
     model_version: Optional[str] = None
     time_preference: Optional[str] = None
-    semester: Optional[str] = None  # Kept for backward compatibility
-    year: Optional[int] = None  # Kept for backward compatibility
-    # Deprecated fields (kept for backward compatibility)
+    semester: Optional[str] = None
+    year: Optional[int] = None
     course_name: Optional[str] = None
     cluster: Optional[str] = None
     credits: Optional[int] = None
 
-# Draft Schedule Schemas
 class DraftSchedule(BaseModel):
     """Response schema for draft schedule"""
     draft_schedule_id: int

@@ -7,8 +7,6 @@ from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Uniq
 from sqlalchemy.sql import func
 from Database.database import Base
 
-# Database Models
-
 class UserDB(Base):
     """
     Database model for User table.
@@ -224,16 +222,14 @@ class RecommendationResultDB(Base):
     
     # Foreign keys
     student_id = Column(Integer, ForeignKey('students.student_id'), nullable=False, index=True)
-    course_id = Column(Integer, ForeignKey('courses.id'), nullable=True)  # Deprecated: can be derived from section->course
+    course_id = Column(Integer, ForeignKey('courses.id'), nullable=True)
     recommended_section_id = Column(Integer, ForeignKey('sections.id'), nullable=False)
     time_slot = Column(Integer, ForeignKey('time_slots.time_slot_id'), nullable=True)
     
     # Recommendation metadata
-    # course_name, cluster, credits removed - can be derived from section->course relationship
-    # Keeping for backward compatibility but marked as deprecated
-    course_name = Column(String(200), nullable=True)  # Deprecated: can be derived from section->course
-    cluster = Column(String(200), nullable=True)  # Deprecated: can be derived from course_cluster
-    credits = Column(Integer, nullable=True)  # Deprecated: can be derived from course
+    course_name = Column(String(200), nullable=True)
+    cluster = Column(String(200), nullable=True)
+    credits = Column(Integer, nullable=True)
     
     # Recommendation logic
     recommendation_score = Column(String(50), nullable=True)  # Score/ranking (can be string for flexibility)
@@ -268,7 +264,7 @@ class DraftScheduleDB(Base):
     student_id = Column(Integer, ForeignKey('students.student_id'), nullable=False, index=True)
     name = Column(String(100), nullable=False)  # e.g., "Schedule 1", "Fall 2025 Draft"
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class DraftScheduleSectionDB(Base):

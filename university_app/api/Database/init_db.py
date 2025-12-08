@@ -9,18 +9,19 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy import inspect
 from Database.database import engine, get_db
-from Database.models import StudentDB, CourseDB, ProgramDB, SectionDB, Base
+from Database.models import StudentDB, CourseDB, ProgramDB, SectionDB
 
 
 def is_database_initialized():
     """
-    Check if database is fully initialized by checking multiple key tables for data.
+    Description:
+        Check if database is fully initialized by checking multiple key tables for data.
     
     Input:
         None
     
-    Return:
-        bool: True if database has data, False if empty.
+    Output:
+        bool: True if database has data, False if empty
     """
     try:
         # Check if tables exist
@@ -31,7 +32,6 @@ def is_database_initialized():
             logger.info("No tables found - database is empty")
             return False
         
-        # Check if key tables have data
         db = next(get_db())
         try:
             checks = {
@@ -41,7 +41,6 @@ def is_database_initialized():
                 'sections': db.query(SectionDB).count(),
             }
             
-            # Database is initialized if ALL key tables have data
             is_initialized = all(count > 0 for count in checks.values())
             
             if is_initialized:
@@ -53,20 +52,20 @@ def is_database_initialized():
         finally:
             db.close()
     except Exception as e:
-        # If we can't check (e.g., tables don't exist), assume empty
         logger.warning(f"Could not check database status: {e}. Assuming empty.")
         return False
 
 
 def initialize_database():
     """
-    Initialize the database by running the ETL process. Always runs ETL to ensure database has fresh data.
+    Description:
+        Initialize the database by running the ETL process. Always runs ETL to ensure database has fresh data.
     
     Input:
         None
     
-    Return:
-        bool: True if initialization successful, False otherwise.
+    Output:
+        bool: True if initialization successful, False otherwise
     """
     try:
         # Find the ETL directory (mounted at /etl)
@@ -167,24 +166,33 @@ def initialize_database():
 
 def ensure_database_initialized():
     """
-    Main function to ensure database is initialized. Always runs ETL to ensure database has data (will handle existing data gracefully).
-    The ETL process handles all table creation, schema checking, and data loading.
+    Description:
+        Main function to ensure database is initialized. Only runs ETL if database is empty or incomplete.
+        Preserves user-generated data (draft schedules, etc.) when database is already initialized.
     
     Input:
         None
     
-    Return:
-        bool: True if initialization successful, False otherwise.
+    Output:
+        bool: True if initialization successful or already initialized, False otherwise
     """
     logger.info("Ensuring database is initialized...")
+    
+    # First, check if database is already initialized
+    if is_database_initialized():
+        logger.info("✅ Database is already initialized. Skipping ETL to preserve user data.")
+        logger.info("   To refresh ETL data manually, run: docker compose run --rm etl bash run_etl.sh")
+        return True
+    
+    # Database is empty or incomplete - run ETL to initialize
+    logger.info("Database is empty or incomplete. Running ETL to initialize...")
     logger.info("ETL will handle table creation, schema checking, and data loading...")
     
     # Run ETL - it will:
     # 1. Check schema version and recreate tables if mismatched
     # 2. Create all tables if they don't exist
-    # 3. Clear existing data
+    # 3. Clear existing ETL data (preserves draft_schedules, draft_schedule_sections)
     # 4. Load fresh data from CSV files
-    logger.info("Running ETL to initialize/refresh database...")
     if initialize_database():
         logger.info("✅ Database initialization completed successfully via ETL.")
         return True

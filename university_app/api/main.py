@@ -5,17 +5,14 @@ Provides REST API endpoints for managing students, courses, and sections.
 This module defines all API endpoints including student CRUD operations.
 """
 
-# Import all models so they are registered with SQLAlchemy Base metadata
-# This ensures all tables are created when Base.metadata.create_all() is called
 from Database.models import (
     UserDB, StudentDB, SectionDB, SectionNameDB, TakesDB, LocationDB, InstructorDB, 
     DepartmentDB, ProgramDB, CourseDB, TimeSlotDB, PrerequisitesDB, 
     WorksDB, HasCourseDB, ClusterDB, CourseClusterDB, PreferredDB,
     RecommendationResultDB,
-    DraftScheduleDB, DraftScheduleSectionDB, Base
+    DraftScheduleDB, DraftScheduleSectionDB
 )
 from Database.schema import (
-    User, UserCreate,
     Student, StudentCreate,
     Location, LocationCreate,
     Instructor, InstructorCreate,
@@ -24,7 +21,6 @@ from Database.schema import (
     Course, CourseCreate,
     TimeSlot, TimeSlotCreate,
     Section, SectionCreate,
-    SectionName, SectionNameCreate,
     Prerequisites, PrerequisitesCreate,
     Takes, TakesCreate,
     Works, WorksCreate,
@@ -39,32 +35,23 @@ from Database.database import get_db, engine
 from Database.init_db import ensure_database_initialized
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
-import json
 import sys
-from datetime import datetime, date
-from typing import Optional, List, Dict
+from datetime import date
+from typing import Optional, List
 
-# Add shared module to path (works both in Docker and locally)
-# In Docker: shared is mounted at /shared
-# Locally: shared is at ../shared relative to api/
-api_dir = os.path.dirname(__file__)
-parent_dir = os.path.dirname(api_dir)
-
-# Try Docker path first (/shared)
 if os.path.exists('/shared'):
     sys.path.insert(0, '/')
-# Try local development path
-elif os.path.exists(os.path.join(parent_dir, 'shared')):
-    sys.path.insert(0, parent_dir)
-# Fallback: try current directory structure
 else:
-    sys.path.insert(0, os.path.dirname(parent_dir) if os.path.basename(parent_dir) == 'university_app' else parent_dir)
+    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    if os.path.exists(os.path.join(parent_dir, 'shared')):
+        sys.path.insert(0, parent_dir)
 
 try:
     from shared.recommender_helpers import generate_recommendations_for_student
@@ -74,24 +61,21 @@ except ImportError as e:
     import traceback
     print(f"Warning: Could not import shared module: {e}")
     print(f"Python path: {sys.path}")
-    print(f"API dir: {api_dir}, Parent dir: {parent_dir}")
     traceback.print_exc()
     generate_recommendations_for_student = None
     SemesterScheduler = None
 
 app = FastAPI(title="University Course Management API")
 
-# Add CORS middleware for frontend
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*").split(",") if os.environ.get("ALLOWED_ORIGINS") else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount static files for syllabi
-# Syllabi are stored in /api/syllabi/ in the container (mounted from ./syllabi on host)
 SYLLABI_DIR = "/api/syllabi"
 if os.path.exists(SYLLABI_DIR):
     app.mount("/syllabi", StaticFiles(directory=SYLLABI_DIR), name="syllabi")
@@ -100,32 +84,60 @@ if os.path.exists(SYLLABI_DIR):
 @app.on_event("startup")
 async def startup_event():
     """
-    Initialize database on startup. Creates tables and loads data if database is empty.
+    Description:
+        Initialize database on startup. Creates tables and loads data if database is empty.
     
     Input:
         None
     
-    Return:
+    Output:
         None
     """
     ensure_database_initialized()
 
-# AUTHENTICATION ENDPOINTS
+
+@app.get("/health", tags=["Health"])
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Description:
+        Health check endpoint for monitoring and load balancers.
+        Checks API and database connectivity.
+    
+    Input:
+        None (uses database dependency)
+    
+    Output:
+        dict: Health status with API and database status
+    """
+    try:
+        # Test database connection
+        db.execute(text("SELECT 1"))
+        db_status = "connected"
+    except SQLAlchemyError:
+        db_status = "disconnected"
+    
+    return {
+        "status": "healthy" if db_status == "connected" else "unhealthy",
+        "api": "operational",
+        "database": db_status
+    }
+
 
 class LoginRequest(BaseModel):
     username: str
     password: str
 
-@app.post("/auth/login", response_model=dict)
+@app.post("/auth/login", response_model=dict, tags=["Authentication"])
 async def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     """
-    Authenticate a user with username and password.
+    Description:
+        Authenticate a user with username and password.
     
     Input:
         credentials (LoginRequest): Username and password
         db (Session): Database session
     
-    Return:
+    Output:
         dict: User information including user_id, username, student_id, and student info
     
     Raises:
@@ -153,19 +165,17 @@ async def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         } if student else None
     }
 
-# STUDENT ENDPOINTS
-
-# GET Request - Retrieve a student by ID
-@app.get("/students/{student_id}", response_model=Student)
+@app.get("/students/{student_id}", response_model=Student, tags=["Students"])
 async def get_student(student_id: int, db: Session = Depends(get_db)):
     """
-    Retrieve a student by their unique ID.
+    Description:
+        Retrieve a student by their unique ID.
 
     Input:
         student_id (int): The unique identifier of the student.
         db (Session): Database session provided by dependency injection.
 
-    Return:
+    Output:
         Student: The student's details.
 
     Raises:
@@ -176,8 +186,7 @@ async def get_student(student_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Student not found")
     return student
 
-# POST Request - Create a new student
-@app.post("/students/", response_model=Student)
+@app.post("/students/", response_model=Student, tags=["Students"])
 async def create_student(student: StudentCreate, db: Session = Depends(get_db)):
     """
     Create a new student record in the database.
@@ -186,22 +195,30 @@ async def create_student(student: StudentCreate, db: Session = Depends(get_db)):
         student (StudentCreate): The student data to create.
         db (Session): Database session provided by dependency injection.
 
-    Return:
+    Output:
         Student: The newly created student's details.
+    
+    Raises:
+        HTTPException: If database error occurs
     """
-    db_student = StudentDB(
-        student_name=student.student_name,
-        credit=student.credit,
-        program_name=student.program_name
-    )
-    db.add(db_student)
-    db.commit()
-    db.refresh(db_student)
-    return db_student
+    try:
+        db_student = StudentDB(
+            student_name=student.student_name,
+            credit=student.credit,
+            program_name=student.program_name
+        )
+        db.add(db_student)
+        db.commit()
+        db.refresh(db_student)
+        return db_student
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
-# PUT - Update a student
-
-@app.put("/students/{student_id}", response_model=Student)
+@app.put("/students/{student_id}", response_model=Student, tags=["Students"])
 async def update_student(student_id: int, updated_student: StudentCreate, db: Session = Depends(get_db)):
     """
     Update an existing student's details in the database.
@@ -211,25 +228,30 @@ async def update_student(student_id: int, updated_student: StudentCreate, db: Se
         updated_student (StudentCreate): The new student data.
         db (Session): Database session provided by dependency injection.
 
-    Return:
+    Output:
         Student: The updated student's details.
 
     Raises:
         HTTPException: If the student is not found, raises a 404 error.
     """
-    student = db.query(StudentDB).filter(StudentDB.student_id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    for key, value in updated_student.model_dump().items():
-        setattr(student, key, value)
-    db.commit()
-    db.refresh(student)
-    return student
+    try:
+        student = db.query(StudentDB).filter(StudentDB.student_id == student_id).first()
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        for key, value in updated_student.model_dump().items():
+            setattr(student, key, value)
+        db.commit()
+        db.refresh(student)
+        return student
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
 
-# DELETE - Delete a student by id
-
-@app.delete("/students/{student_id}")
+@app.delete("/students/{student_id}", tags=["Students"])
 async def delete_student(student_id: int, db: Session = Depends(get_db)):
     """
     Delete a student by their unique ID from the database.
@@ -238,22 +260,29 @@ async def delete_student(student_id: int, db: Session = Depends(get_db)):
         student_id (int): The unique identifier of the student to delete.
         db (Session): Database session provided by dependency injection.
 
-    Return:
+    Output:
         dict: A message confirming successful deletion.
 
     Raises:
         HTTPException: If the student is not found, raises a 404 error.
     """
-    student = db.query(StudentDB).filter(StudentDB.student_id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    db.delete(student)
-    db.commit()
-    return {"message": "Student deleted successfully"}
+    try:
+        student = db.query(StudentDB).filter(StudentDB.student_id == student_id).first()
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        db.delete(student)
+        db.commit()
+        return {"message": "Student deleted successfully"}
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error deleting student: {str(e)}")
 
 # SECTION ENDPOINTS
 
-@app.get("/sections")
+@app.get("/sections", tags=["Sections"])
 async def get_sections(
     year: Optional[str] = None,
     semester: Optional[str] = None,
@@ -262,8 +291,9 @@ async def get_sections(
     db: Session = Depends(get_db)
 ):
     """
-    Get all sections with optional filtering by year, semester, course type, and search text.
-    Returns sections with joined data from courses, instructors, time slots, and locations for frontend display.
+    Description:
+        Get all sections with optional filtering by year, semester, course type, and search text.
+        Returns sections with joined data from courses, instructors, time slots, and locations for frontend display.
     
     Input:
         year (Optional[int]): Filter by year.
@@ -272,7 +302,7 @@ async def get_sections(
         search (Optional[str]): Search by course name.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[dict]: List of sections with joined course, instructor, time slot, and location data.
     """
     # Filter by course type if provided - course_type is now the program name directly
@@ -407,6 +437,7 @@ async def get_sections(
             "location": location.building_room_name if location else "",
             "duration": section.duration or "",
             "syllabusUrl": section.syllabus_url,
+            "instructorBioUrl": instructor.bio_url if instructor else None,
             "credits": course.credits or 0,
             "semester": timeslot.semester if timeslot else "",
             "year": timeslot.year if timeslot else None,
@@ -415,7 +446,7 @@ async def get_sections(
     
     return formatted_sections
 
-@app.get("/sections/{section_id}", response_model=Section)
+@app.get("/sections/{section_id}", response_model=Section, tags=["Sections"])
 async def get_section(section_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a section by its unique ID.
@@ -424,7 +455,7 @@ async def get_section(section_id: int, db: Session = Depends(get_db)):
         section_id (int): The unique identifier of the section.
         db (Session): Database session.
     
-    Return:
+    Output:
         Section: The section's details.
     
     Raises:
@@ -435,7 +466,7 @@ async def get_section(section_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Section not found")
     return section
 
-@app.post("/sections/", response_model=Section)
+@app.post("/sections/", response_model=Section, tags=["Sections"])
 async def create_section(section: SectionCreate, db: Session = Depends(get_db)):
     """
     Create a new section record in the database.
@@ -444,16 +475,26 @@ async def create_section(section: SectionCreate, db: Session = Depends(get_db)):
         section (SectionCreate): The section data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Section: The newly created section's details.
+    
+    Raises:
+        HTTPException: If database error occurs
     """
-    db_section = SectionDB(**section.model_dump())
-    db.add(db_section)
-    db.commit()
-    db.refresh(db_section)
-    return db_section
+    try:
+        db_section = SectionDB(**section.model_dump())
+        db.add(db_section)
+        db.commit()
+        db.refresh(db_section)
+        return db_section
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
-@app.put("/sections/{section_id}", response_model=Section)
+@app.put("/sections/{section_id}", response_model=Section, tags=["Sections"])
 async def update_section(section_id: int, updated_section: SectionCreate, db: Session = Depends(get_db)):
     """
     Update an existing section's details in the database.
@@ -463,22 +504,29 @@ async def update_section(section_id: int, updated_section: SectionCreate, db: Se
         updated_section (SectionCreate): The new section data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Section: The updated section's details.
     
     Raises:
         HTTPException: If the section is not found, raises a 404 error.
     """
-    section = db.query(SectionDB).filter(SectionDB.id == section_id).first()
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-    for key, value in updated_section.model_dump().items():
-        setattr(section, key, value)
-    db.commit()
-    db.refresh(section)
-    return section
+    try:
+        section = db.query(SectionDB).filter(SectionDB.id == section_id).first()
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+        for key, value in updated_section.model_dump().items():
+            setattr(section, key, value)
+        db.commit()
+        db.refresh(section)
+        return section
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
-@app.delete("/sections/{section_id}")
+@app.delete("/sections/{section_id}", tags=["Sections"])
 async def delete_section(section_id: int, db: Session = Depends(get_db)):
     """
     Delete a section by its unique ID from the database.
@@ -487,22 +535,29 @@ async def delete_section(section_id: int, db: Session = Depends(get_db)):
         section_id (int): The unique identifier of the section to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
         HTTPException: If the section is not found, raises a 404 error.
     """
-    section = db.query(SectionDB).filter(SectionDB.id == section_id).first()
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-    db.delete(section)
-    db.commit()
-    return {"message": "Section deleted successfully"}
+    try:
+        section = db.query(SectionDB).filter(SectionDB.id == section_id).first()
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+        db.delete(section)
+        db.commit()
+        return {"message": "Section deleted successfully"}
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error deleting section: {str(e)}")
 
 # COURSE ENDPOINTS
 
-@app.get("/courses", response_model=list[Course])
+@app.get("/courses", response_model=list[Course], tags=["Courses"])
 async def get_courses(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     Get all courses with pagination.
@@ -512,13 +567,13 @@ async def get_courses(skip: int = 0, limit: int = 100, db: Session = Depends(get
         limit (int): Maximum number of records to return, default 100.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Course]: List of courses.
     """
     courses = db.query(CourseDB).offset(skip).limit(limit).all()
     return courses
 
-@app.get("/courses/{course_id}", response_model=Course)
+@app.get("/courses/{course_id}", response_model=Course, tags=["Courses"])
 async def get_course(course_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a course by its unique ID.
@@ -527,7 +582,7 @@ async def get_course(course_id: int, db: Session = Depends(get_db)):
         course_id (int): The unique identifier of the course.
         db (Session): Database session.
     
-    Return:
+    Output:
         Course: The course's details.
     
     Raises:
@@ -538,7 +593,7 @@ async def get_course(course_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Course not found")
     return course
 
-@app.post("/courses/", response_model=Course)
+@app.post("/courses/", response_model=Course, tags=["Courses"])
 async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
     """
     Create a new course record in the database.
@@ -547,16 +602,26 @@ async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
         course (CourseCreate): The course data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Course: The newly created course's details.
+    
+    Raises:
+        HTTPException: If database error occurs
     """
-    db_course = CourseDB(**course.model_dump())
-    db.add(db_course)
-    db.commit()
-    db.refresh(db_course)
-    return db_course
+    try:
+        db_course = CourseDB(**course.model_dump())
+        db.add(db_course)
+        db.commit()
+        db.refresh(db_course)
+        return db_course
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
-@app.put("/courses/{course_id}", response_model=Course)
+@app.put("/courses/{course_id}", response_model=Course, tags=["Courses"])
 async def update_course(course_id: int, updated_course: CourseCreate, db: Session = Depends(get_db)):
     """
     Update an existing course's details in the database.
@@ -566,7 +631,7 @@ async def update_course(course_id: int, updated_course: CourseCreate, db: Sessio
         updated_course (CourseCreate): The new course data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Course: The updated course's details.
     
     Raises:
@@ -581,7 +646,7 @@ async def update_course(course_id: int, updated_course: CourseCreate, db: Sessio
     db.refresh(course)
     return course
 
-@app.delete("/courses/{course_id}")
+@app.delete("/courses/{course_id}", tags=["Courses"])
 async def delete_course(course_id: int, db: Session = Depends(get_db)):
     """
     Delete a course by its unique ID from the database.
@@ -590,7 +655,7 @@ async def delete_course(course_id: int, db: Session = Depends(get_db)):
         course_id (int): The unique identifier of the course to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -605,7 +670,7 @@ async def delete_course(course_id: int, db: Session = Depends(get_db)):
 
 # INSTRUCTOR ENDPOINTS
 
-@app.get("/instructors", response_model=list[Instructor])
+@app.get("/instructors", response_model=list[Instructor], tags=["Instructors"])
 async def get_instructors(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     Get all instructors with pagination.
@@ -615,13 +680,13 @@ async def get_instructors(skip: int = 0, limit: int = 100, db: Session = Depends
         limit (int): Maximum number of records to return, default 100.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Instructor]: List of instructors.
     """
     instructors = db.query(InstructorDB).offset(skip).limit(limit).all()
     return instructors
 
-@app.get("/instructors/{instructor_id}", response_model=Instructor)
+@app.get("/instructors/{instructor_id}", response_model=Instructor, tags=["Instructors"])
 async def get_instructor(instructor_id: int, db: Session = Depends(get_db)):
     """
     Retrieve an instructor by their unique ID.
@@ -630,7 +695,7 @@ async def get_instructor(instructor_id: int, db: Session = Depends(get_db)):
         instructor_id (int): The unique identifier of the instructor.
         db (Session): Database session.
     
-    Return:
+    Output:
         Instructor: The instructor's details.
     
     Raises:
@@ -641,7 +706,7 @@ async def get_instructor(instructor_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Instructor not found")
     return instructor
 
-@app.post("/instructors/", response_model=Instructor)
+@app.post("/instructors/", response_model=Instructor, tags=["Instructors"])
 async def create_instructor(instructor: InstructorCreate, db: Session = Depends(get_db)):
     """
     Create a new instructor record in the database.
@@ -650,7 +715,7 @@ async def create_instructor(instructor: InstructorCreate, db: Session = Depends(
         instructor (InstructorCreate): The instructor data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Instructor: The newly created instructor's details.
     """
     db_instructor = InstructorDB(**instructor.model_dump())
@@ -659,7 +724,7 @@ async def create_instructor(instructor: InstructorCreate, db: Session = Depends(
     db.refresh(db_instructor)
     return db_instructor
 
-@app.put("/instructors/{instructor_id}", response_model=Instructor)
+@app.put("/instructors/{instructor_id}", response_model=Instructor, tags=["Instructors"])
 async def update_instructor(instructor_id: int, updated_instructor: InstructorCreate, db: Session = Depends(get_db)):
     """
     Update an existing instructor's details in the database.
@@ -669,7 +734,7 @@ async def update_instructor(instructor_id: int, updated_instructor: InstructorCr
         updated_instructor (InstructorCreate): The new instructor data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Instructor: The updated instructor's details.
     
     Raises:
@@ -684,7 +749,7 @@ async def update_instructor(instructor_id: int, updated_instructor: InstructorCr
     db.refresh(instructor)
     return instructor
 
-@app.delete("/instructors/{instructor_id}")
+@app.delete("/instructors/{instructor_id}", tags=["Instructors"])
 async def delete_instructor(instructor_id: int, db: Session = Depends(get_db)):
     """
     Delete an instructor by their unique ID from the database.
@@ -693,7 +758,7 @@ async def delete_instructor(instructor_id: int, db: Session = Depends(get_db)):
         instructor_id (int): The unique identifier of the instructor to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -708,7 +773,7 @@ async def delete_instructor(instructor_id: int, db: Session = Depends(get_db)):
 
 # DEPARTMENT ENDPOINTS
 
-@app.get("/departments", response_model=list[Department])
+@app.get("/departments", response_model=list[Department], tags=["Departments"])
 async def get_departments(db: Session = Depends(get_db)):
     """
     Get all departments.
@@ -716,13 +781,13 @@ async def get_departments(db: Session = Depends(get_db)):
     Input:
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Department]: List of departments.
     """
     departments = db.query(DepartmentDB).all()
     return departments
 
-@app.get("/departments/{dept_name}", response_model=Department)
+@app.get("/departments/{dept_name}", response_model=Department, tags=["Departments"])
 async def get_department(dept_name: str, db: Session = Depends(get_db)):
     """
     Retrieve a department by its name.
@@ -731,7 +796,7 @@ async def get_department(dept_name: str, db: Session = Depends(get_db)):
         dept_name (str): The name of the department.
         db (Session): Database session.
     
-    Return:
+    Output:
         Department: The department's details.
     
     Raises:
@@ -742,7 +807,7 @@ async def get_department(dept_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Department not found")
     return department
 
-@app.post("/departments/", response_model=Department)
+@app.post("/departments/", response_model=Department, tags=["Departments"])
 async def create_department(department: DepartmentCreate, db: Session = Depends(get_db)):
     """
     Create a new department record in the database.
@@ -751,7 +816,7 @@ async def create_department(department: DepartmentCreate, db: Session = Depends(
         department (DepartmentCreate): The department data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Department: The newly created department's details.
     """
     db_department = DepartmentDB(**department.model_dump())
@@ -760,7 +825,7 @@ async def create_department(department: DepartmentCreate, db: Session = Depends(
     db.refresh(db_department)
     return db_department
 
-@app.put("/departments/{dept_name}", response_model=Department)
+@app.put("/departments/{dept_name}", response_model=Department, tags=["Departments"])
 async def update_department(dept_name: str, updated_department: DepartmentCreate, db: Session = Depends(get_db)):
     """
     Update an existing department's details in the database.
@@ -770,7 +835,7 @@ async def update_department(dept_name: str, updated_department: DepartmentCreate
         updated_department (DepartmentCreate): The new department data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Department: The updated department's details.
     
     Raises:
@@ -785,7 +850,7 @@ async def update_department(dept_name: str, updated_department: DepartmentCreate
     db.refresh(department)
     return department
 
-@app.delete("/departments/{dept_name}")
+@app.delete("/departments/{dept_name}", tags=["Departments"])
 async def delete_department(dept_name: str, db: Session = Depends(get_db)):
     """
     Delete a department by its name from the database.
@@ -794,7 +859,7 @@ async def delete_department(dept_name: str, db: Session = Depends(get_db)):
         dept_name (str): The name of the department to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -809,7 +874,7 @@ async def delete_department(dept_name: str, db: Session = Depends(get_db)):
 
 # PROGRAM ENDPOINTS
 
-@app.get("/programs", response_model=list[Program])
+@app.get("/programs", response_model=list[Program], tags=["Programs"])
 async def get_programs(db: Session = Depends(get_db)):
     """
     Get all programs.
@@ -817,13 +882,13 @@ async def get_programs(db: Session = Depends(get_db)):
     Input:
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Program]: List of programs.
     """
     programs = db.query(ProgramDB).all()
     return programs
 
-@app.get("/programs/{prog_name}", response_model=Program)
+@app.get("/programs/{prog_name}", response_model=Program, tags=["Programs"])
 async def get_program(prog_name: str, db: Session = Depends(get_db)):
     """
     Retrieve a program by its name.
@@ -832,7 +897,7 @@ async def get_program(prog_name: str, db: Session = Depends(get_db)):
         prog_name (str): The name of the program.
         db (Session): Database session.
     
-    Return:
+    Output:
         Program: The program's details.
     
     Raises:
@@ -843,7 +908,7 @@ async def get_program(prog_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Program not found")
     return program
 
-@app.post("/programs/", response_model=Program)
+@app.post("/programs/", response_model=Program, tags=["Programs"])
 async def create_program(program: ProgramCreate, db: Session = Depends(get_db)):
     """
     Create a new program record in the database.
@@ -852,7 +917,7 @@ async def create_program(program: ProgramCreate, db: Session = Depends(get_db)):
         program (ProgramCreate): The program data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Program: The newly created program's details.
     """
     db_program = ProgramDB(**program.model_dump())
@@ -861,7 +926,7 @@ async def create_program(program: ProgramCreate, db: Session = Depends(get_db)):
     db.refresh(db_program)
     return db_program
 
-@app.put("/programs/{prog_name}", response_model=Program)
+@app.put("/programs/{prog_name}", response_model=Program, tags=["Programs"])
 async def update_program(prog_name: str, updated_program: ProgramCreate, db: Session = Depends(get_db)):
     """
     Update an existing program's details in the database.
@@ -871,7 +936,7 @@ async def update_program(prog_name: str, updated_program: ProgramCreate, db: Ses
         updated_program (ProgramCreate): The new program data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Program: The updated program's details.
     
     Raises:
@@ -886,7 +951,7 @@ async def update_program(prog_name: str, updated_program: ProgramCreate, db: Ses
     db.refresh(program)
     return program
 
-@app.delete("/programs/{prog_name}")
+@app.delete("/programs/{prog_name}", tags=["Programs"])
 async def delete_program(prog_name: str, db: Session = Depends(get_db)):
     """
     Delete a program by its name from the database.
@@ -895,7 +960,7 @@ async def delete_program(prog_name: str, db: Session = Depends(get_db)):
         prog_name (str): The name of the program to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -910,7 +975,7 @@ async def delete_program(prog_name: str, db: Session = Depends(get_db)):
 
 # LOCATION ENDPOINTS
 
-@app.get("/locations", response_model=list[Location])
+@app.get("/locations", response_model=list[Location], tags=["Locations"])
 async def get_locations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     Get all locations with pagination.
@@ -920,13 +985,13 @@ async def get_locations(skip: int = 0, limit: int = 100, db: Session = Depends(g
         limit (int): Maximum number of records to return, default 100.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Location]: List of locations.
     """
     locations = db.query(LocationDB).offset(skip).limit(limit).all()
     return locations
 
-@app.get("/locations/{room_id}", response_model=Location)
+@app.get("/locations/{room_id}", response_model=Location, tags=["Locations"])
 async def get_location(room_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a location by its room ID.
@@ -935,7 +1000,7 @@ async def get_location(room_id: int, db: Session = Depends(get_db)):
         room_id (int): The unique identifier of the location.
         db (Session): Database session.
     
-    Return:
+    Output:
         Location: The location's details.
     
     Raises:
@@ -946,7 +1011,7 @@ async def get_location(room_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Location not found")
     return location
 
-@app.post("/locations/", response_model=Location)
+@app.post("/locations/", response_model=Location, tags=["Locations"])
 async def create_location(location: LocationCreate, db: Session = Depends(get_db)):
     """
     Create a new location record in the database.
@@ -955,7 +1020,7 @@ async def create_location(location: LocationCreate, db: Session = Depends(get_db
         location (LocationCreate): The location data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Location: The newly created location's details.
     """
     db_location = LocationDB(**location.model_dump())
@@ -964,7 +1029,7 @@ async def create_location(location: LocationCreate, db: Session = Depends(get_db
     db.refresh(db_location)
     return db_location
 
-@app.put("/locations/{room_id}", response_model=Location)
+@app.put("/locations/{room_id}", response_model=Location, tags=["Locations"])
 async def update_location(room_id: int, updated_location: LocationCreate, db: Session = Depends(get_db)):
     """
     Update an existing location's details in the database.
@@ -974,7 +1039,7 @@ async def update_location(room_id: int, updated_location: LocationCreate, db: Se
         updated_location (LocationCreate): The new location data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Location: The updated location's details.
     
     Raises:
@@ -989,7 +1054,7 @@ async def update_location(room_id: int, updated_location: LocationCreate, db: Se
     db.refresh(location)
     return location
 
-@app.delete("/locations/{room_id}")
+@app.delete("/locations/{room_id}", tags=["Locations"])
 async def delete_location(room_id: int, db: Session = Depends(get_db)):
     """
     Delete a location by its room ID from the database.
@@ -998,7 +1063,7 @@ async def delete_location(room_id: int, db: Session = Depends(get_db)):
         room_id (int): The unique identifier of the location to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1013,7 +1078,7 @@ async def delete_location(room_id: int, db: Session = Depends(get_db)):
 
 # TIMESLOT ENDPOINTS
 
-@app.get("/timeslots", response_model=list[TimeSlot])
+@app.get("/timeslots", response_model=list[TimeSlot], tags=["Time Slots"])
 async def get_timeslots(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     Get all time slots with pagination.
@@ -1023,13 +1088,13 @@ async def get_timeslots(skip: int = 0, limit: int = 100, db: Session = Depends(g
         limit (int): Maximum number of records to return, default 100.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[TimeSlot]: List of time slots.
     """
     timeslots = db.query(TimeSlotDB).offset(skip).limit(limit).all()
     return timeslots
 
-@app.get("/timeslots/{time_slot_id}", response_model=TimeSlot)
+@app.get("/timeslots/{time_slot_id}", response_model=TimeSlot, tags=["Time Slots"])
 async def get_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a time slot by its unique ID.
@@ -1038,7 +1103,7 @@ async def get_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
         time_slot_id (int): The unique identifier of the time slot.
         db (Session): Database session.
     
-    Return:
+    Output:
         TimeSlot: The time slot's details.
     
     Raises:
@@ -1049,7 +1114,7 @@ async def get_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Time slot not found")
     return timeslot
 
-@app.post("/timeslots/", response_model=TimeSlot)
+@app.post("/timeslots/", response_model=TimeSlot, tags=["Time Slots"])
 async def create_timeslot(timeslot: TimeSlotCreate, db: Session = Depends(get_db)):
     """
     Create a new time slot record in the database.
@@ -1058,7 +1123,7 @@ async def create_timeslot(timeslot: TimeSlotCreate, db: Session = Depends(get_db
         timeslot (TimeSlotCreate): The time slot data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         TimeSlot: The newly created time slot's details.
     """
     db_timeslot = TimeSlotDB(**timeslot.model_dump())
@@ -1067,7 +1132,7 @@ async def create_timeslot(timeslot: TimeSlotCreate, db: Session = Depends(get_db
     db.refresh(db_timeslot)
     return db_timeslot
 
-@app.put("/timeslots/{time_slot_id}", response_model=TimeSlot)
+@app.put("/timeslots/{time_slot_id}", response_model=TimeSlot, tags=["Time Slots"])
 async def update_timeslot(time_slot_id: int, updated_timeslot: TimeSlotCreate, db: Session = Depends(get_db)):
     """
     Update an existing time slot's details in the database.
@@ -1077,7 +1142,7 @@ async def update_timeslot(time_slot_id: int, updated_timeslot: TimeSlotCreate, d
         updated_timeslot (TimeSlotCreate): The new time slot data.
         db (Session): Database session.
     
-    Return:
+    Output:
         TimeSlot: The updated time slot's details.
     
     Raises:
@@ -1092,7 +1157,7 @@ async def update_timeslot(time_slot_id: int, updated_timeslot: TimeSlotCreate, d
     db.refresh(timeslot)
     return timeslot
 
-@app.delete("/timeslots/{time_slot_id}")
+@app.delete("/timeslots/{time_slot_id}", tags=["Time Slots"])
 async def delete_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
     """
     Delete a time slot by its unique ID from the database.
@@ -1101,7 +1166,7 @@ async def delete_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
         time_slot_id (int): The unique identifier of the time slot to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1116,7 +1181,7 @@ async def delete_timeslot(time_slot_id: int, db: Session = Depends(get_db)):
 
 # TAKES ENDPOINTS (Student Enrollments)
 
-@app.get("/takes", response_model=list[Takes])
+@app.get("/takes", response_model=list[Takes], tags=["Enrollments"])
 async def get_takes(student_id: Optional[int] = None, section_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Get all student enrollments (takes) with optional filtering.
@@ -1126,7 +1191,7 @@ async def get_takes(student_id: Optional[int] = None, section_id: Optional[int] 
         section_id (Optional[int]): Filter by section ID.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Takes]: List of enrollment records.
     """
     query = db.query(TakesDB)
@@ -1137,7 +1202,7 @@ async def get_takes(student_id: Optional[int] = None, section_id: Optional[int] 
     takes = query.all()
     return takes
 
-@app.post("/takes/", response_model=Takes)
+@app.post("/takes/", response_model=Takes, tags=["Enrollments"])
 async def create_takes(takes: TakesCreate, db: Session = Depends(get_db)):
     """
     Create a new student enrollment record in the database.
@@ -1146,16 +1211,26 @@ async def create_takes(takes: TakesCreate, db: Session = Depends(get_db)):
         takes (TakesCreate): The enrollment data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Takes: The newly created enrollment record.
+    
+    Raises:
+        HTTPException: If database error occurs
     """
-    db_takes = TakesDB(**takes.model_dump())
-    db.add(db_takes)
-    db.commit()
-    db.refresh(db_takes)
-    return db_takes
+    try:
+        db_takes = TakesDB(**takes.model_dump())
+        db.add(db_takes)
+        db.commit()
+        db.refresh(db_takes)
+        return db_takes
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
 
-@app.delete("/takes/")
+@app.delete("/takes/", tags=["Enrollments"])
 async def delete_takes(student_id: int, section_id: int, db: Session = Depends(get_db)):
     """
     Delete a student enrollment record from the database.
@@ -1165,7 +1240,7 @@ async def delete_takes(student_id: int, section_id: int, db: Session = Depends(g
         section_id (int): The unique identifier of the section.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1183,7 +1258,7 @@ async def delete_takes(student_id: int, section_id: int, db: Session = Depends(g
 
 # PREREQUISITES ENDPOINTS
 
-@app.get("/prerequisites", response_model=list[Prerequisites])
+@app.get("/prerequisites", response_model=list[Prerequisites], tags=["Prerequisites"])
 async def get_prerequisites(course_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Get all prerequisites with optional filtering by course ID.
@@ -1192,7 +1267,7 @@ async def get_prerequisites(course_id: Optional[int] = None, db: Session = Depen
         course_id (Optional[int]): Filter by course ID.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Prerequisites]: List of prerequisite records.
     """
     query = db.query(PrerequisitesDB)
@@ -1201,7 +1276,7 @@ async def get_prerequisites(course_id: Optional[int] = None, db: Session = Depen
     prerequisites = query.all()
     return prerequisites
 
-@app.post("/prerequisites/", response_model=Prerequisites)
+@app.post("/prerequisites/", response_model=Prerequisites, tags=["Prerequisites"])
 async def create_prerequisites(prerequisites: PrerequisitesCreate, db: Session = Depends(get_db)):
     """
     Create a new prerequisite record in the database.
@@ -1210,7 +1285,7 @@ async def create_prerequisites(prerequisites: PrerequisitesCreate, db: Session =
         prerequisites (PrerequisitesCreate): The prerequisite data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Prerequisites: The newly created prerequisite record.
     """
     db_prerequisites = PrerequisitesDB(**prerequisites.model_dump())
@@ -1219,7 +1294,7 @@ async def create_prerequisites(prerequisites: PrerequisitesCreate, db: Session =
     db.refresh(db_prerequisites)
     return db_prerequisites
 
-@app.delete("/prerequisites/")
+@app.delete("/prerequisites/", tags=["Prerequisites"])
 async def delete_prerequisites(course_id: int, prerequisite_id: int, db: Session = Depends(get_db)):
     """
     Delete a prerequisite record from the database.
@@ -1229,7 +1304,7 @@ async def delete_prerequisites(course_id: int, prerequisite_id: int, db: Session
         prerequisite_id (int): The unique identifier of the prerequisite course.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1247,7 +1322,7 @@ async def delete_prerequisites(course_id: int, prerequisite_id: int, db: Session
 
 # WORKS ENDPOINTS (Instructor-Department relationship)
 
-@app.get("/works", response_model=list[Works])
+@app.get("/works", response_model=list[Works], tags=["Works"])
 async def get_works(instructorid: Optional[int] = None, dept_name: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Get all instructor-department relationships with optional filtering.
@@ -1257,7 +1332,7 @@ async def get_works(instructorid: Optional[int] = None, dept_name: Optional[str]
         dept_name (Optional[str]): Filter by department name.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Works]: List of instructor-department relationships.
     """
     query = db.query(WorksDB)
@@ -1268,7 +1343,7 @@ async def get_works(instructorid: Optional[int] = None, dept_name: Optional[str]
     works = query.all()
     return works
 
-@app.post("/works/", response_model=Works)
+@app.post("/works/", response_model=Works, tags=["Works"])
 async def create_works(works: WorksCreate, db: Session = Depends(get_db)):
     """
     Create a new instructor-department relationship record in the database.
@@ -1277,7 +1352,7 @@ async def create_works(works: WorksCreate, db: Session = Depends(get_db)):
         works (WorksCreate): The relationship data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Works: The newly created relationship record.
     """
     db_works = WorksDB(**works.model_dump())
@@ -1286,7 +1361,7 @@ async def create_works(works: WorksCreate, db: Session = Depends(get_db)):
     db.refresh(db_works)
     return db_works
 
-@app.delete("/works/")
+@app.delete("/works/", tags=["Works"])
 async def delete_works(instructorid: int, dept_name: str, db: Session = Depends(get_db)):
     """
     Delete an instructor-department relationship record from the database.
@@ -1296,7 +1371,7 @@ async def delete_works(instructorid: int, dept_name: str, db: Session = Depends(
         dept_name (str): The name of the department.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1314,7 +1389,7 @@ async def delete_works(instructorid: int, dept_name: str, db: Session = Depends(
 
 # HASCOURSE ENDPOINTS (Program-Course relationship)
 
-@app.get("/hascourse", response_model=list[HasCourse])
+@app.get("/hascourse", response_model=list[HasCourse], tags=["Program Courses"])
 async def get_hascourse(prog_name: Optional[str] = None, courseid: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Get all program-course relationships with optional filtering.
@@ -1324,7 +1399,7 @@ async def get_hascourse(prog_name: Optional[str] = None, courseid: Optional[int]
         courseid (Optional[int]): Filter by course ID.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[HasCourse]: List of program-course relationships.
     """
     query = db.query(HasCourseDB)
@@ -1335,7 +1410,7 @@ async def get_hascourse(prog_name: Optional[str] = None, courseid: Optional[int]
     hascourse = query.all()
     return hascourse
 
-@app.post("/hascourse/", response_model=HasCourse)
+@app.post("/hascourse/", response_model=HasCourse, tags=["Program Courses"])
 async def create_hascourse(hascourse: HasCourseCreate, db: Session = Depends(get_db)):
     """
     Create a new program-course relationship record in the database.
@@ -1344,7 +1419,7 @@ async def create_hascourse(hascourse: HasCourseCreate, db: Session = Depends(get
         hascourse (HasCourseCreate): The relationship data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         HasCourse: The newly created relationship record.
     """
     db_hascourse = HasCourseDB(**hascourse.model_dump())
@@ -1353,7 +1428,7 @@ async def create_hascourse(hascourse: HasCourseCreate, db: Session = Depends(get
     db.refresh(db_hascourse)
     return db_hascourse
 
-@app.delete("/hascourse/")
+@app.delete("/hascourse/", tags=["Program Courses"])
 async def delete_hascourse(prog_name: str, courseid: int, db: Session = Depends(get_db)):
     """
     Delete a program-course relationship record from the database.
@@ -1363,7 +1438,7 @@ async def delete_hascourse(prog_name: str, courseid: int, db: Session = Depends(
         courseid (int): The unique identifier of the course.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1381,7 +1456,7 @@ async def delete_hascourse(prog_name: str, courseid: int, db: Session = Depends(
 
 # CLUSTER ENDPOINTS
 
-@app.get("/clusters", response_model=list[Cluster])
+@app.get("/clusters", response_model=list[Cluster], tags=["Clusters"])
 async def get_clusters(prog_name: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Get all clusters with optional filtering by program name.
@@ -1390,7 +1465,7 @@ async def get_clusters(prog_name: Optional[str] = None, db: Session = Depends(ge
         prog_name (Optional[str]): Filter by program name.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Cluster]: List of clusters.
     """
     query = db.query(ClusterDB)
@@ -1399,7 +1474,7 @@ async def get_clusters(prog_name: Optional[str] = None, db: Session = Depends(ge
     clusters = query.all()
     return clusters
 
-@app.get("/clusters/{cluster_id}", response_model=Cluster)
+@app.get("/clusters/{cluster_id}", response_model=Cluster, tags=["Clusters"])
 async def get_cluster(cluster_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a cluster by its unique ID.
@@ -1408,7 +1483,7 @@ async def get_cluster(cluster_id: int, db: Session = Depends(get_db)):
         cluster_id (int): The unique identifier of the cluster.
         db (Session): Database session.
     
-    Return:
+    Output:
         Cluster: The cluster's details.
     
     Raises:
@@ -1419,7 +1494,7 @@ async def get_cluster(cluster_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Cluster not found")
     return cluster
 
-@app.post("/clusters/", response_model=Cluster)
+@app.post("/clusters/", response_model=Cluster, tags=["Clusters"])
 async def create_cluster(cluster: ClusterCreate, db: Session = Depends(get_db)):
     """
     Create a new cluster record in the database.
@@ -1428,7 +1503,7 @@ async def create_cluster(cluster: ClusterCreate, db: Session = Depends(get_db)):
         cluster (ClusterCreate): The cluster data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Cluster: The newly created cluster's details.
     """
     db_cluster = ClusterDB(**cluster.model_dump())
@@ -1437,7 +1512,7 @@ async def create_cluster(cluster: ClusterCreate, db: Session = Depends(get_db)):
     db.refresh(db_cluster)
     return db_cluster
 
-@app.put("/clusters/{cluster_id}", response_model=Cluster)
+@app.put("/clusters/{cluster_id}", response_model=Cluster, tags=["Clusters"])
 async def update_cluster(cluster_id: int, updated_cluster: ClusterCreate, db: Session = Depends(get_db)):
     """
     Update an existing cluster's details in the database.
@@ -1447,7 +1522,7 @@ async def update_cluster(cluster_id: int, updated_cluster: ClusterCreate, db: Se
         updated_cluster (ClusterCreate): The new cluster data.
         db (Session): Database session.
     
-    Return:
+    Output:
         Cluster: The updated cluster's details.
     
     Raises:
@@ -1462,7 +1537,7 @@ async def update_cluster(cluster_id: int, updated_cluster: ClusterCreate, db: Se
     db.refresh(cluster)
     return cluster
 
-@app.delete("/clusters/{cluster_id}")
+@app.delete("/clusters/{cluster_id}", tags=["Clusters"])
 async def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
     """
     Delete a cluster by its unique ID from the database.
@@ -1471,7 +1546,7 @@ async def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
         cluster_id (int): The unique identifier of the cluster to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1486,7 +1561,7 @@ async def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
 
 # COURSECLUSTER ENDPOINTS (Course-Cluster relationship)
 
-@app.get("/coursecluster", response_model=list[CourseCluster])
+@app.get("/coursecluster", response_model=list[CourseCluster], tags=["Course Clusters"])
 async def get_coursecluster(course_id: Optional[int] = None, cluster_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Get all course-cluster relationships with optional filtering.
@@ -1496,7 +1571,7 @@ async def get_coursecluster(course_id: Optional[int] = None, cluster_id: Optiona
         cluster_id (Optional[int]): Filter by cluster ID.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[CourseCluster]: List of course-cluster relationships.
     """
     query = db.query(CourseClusterDB)
@@ -1507,7 +1582,7 @@ async def get_coursecluster(course_id: Optional[int] = None, cluster_id: Optiona
     courseclusters = query.all()
     return courseclusters
 
-@app.post("/coursecluster/", response_model=CourseCluster)
+@app.post("/coursecluster/", response_model=CourseCluster, tags=["Course Clusters"])
 async def create_coursecluster(coursecluster: CourseClusterCreate, db: Session = Depends(get_db)):
     """
     Create a new course-cluster relationship record in the database.
@@ -1516,7 +1591,7 @@ async def create_coursecluster(coursecluster: CourseClusterCreate, db: Session =
         coursecluster (CourseClusterCreate): The relationship data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         CourseCluster: The newly created relationship record.
     """
     db_coursecluster = CourseClusterDB(**coursecluster.model_dump())
@@ -1525,7 +1600,7 @@ async def create_coursecluster(coursecluster: CourseClusterCreate, db: Session =
     db.refresh(db_coursecluster)
     return db_coursecluster
 
-@app.delete("/coursecluster/")
+@app.delete("/coursecluster/", tags=["Course Clusters"])
 async def delete_coursecluster(course_id: int, cluster_id: int, db: Session = Depends(get_db)):
     """
     Delete a course-cluster relationship record from the database.
@@ -1535,7 +1610,7 @@ async def delete_coursecluster(course_id: int, cluster_id: int, db: Session = De
         cluster_id (int): The unique identifier of the cluster.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1553,7 +1628,7 @@ async def delete_coursecluster(course_id: int, cluster_id: int, db: Session = De
 
 # PREFERRED ENDPOINTS (Student-Course preferences)
 
-@app.get("/preferred", response_model=list[Preferred])
+@app.get("/preferred", response_model=list[Preferred], tags=["Preferences"])
 async def get_preferred(student_id: Optional[int] = None, course_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Get all student-course preferences with optional filtering.
@@ -1563,7 +1638,7 @@ async def get_preferred(student_id: Optional[int] = None, course_id: Optional[in
         course_id (Optional[int]): Filter by course ID.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[Preferred]: List of student-course preferences.
     """
     query = db.query(PreferredDB)
@@ -1574,7 +1649,7 @@ async def get_preferred(student_id: Optional[int] = None, course_id: Optional[in
     preferred = query.all()
     return preferred
 
-@app.post("/preferred/", response_model=Preferred)
+@app.post("/preferred/", response_model=Preferred, tags=["Preferences"])
 async def create_preferred(preferred: PreferredCreate, db: Session = Depends(get_db)):
     """
     Create a new student-course preference record in the database.
@@ -1583,7 +1658,7 @@ async def create_preferred(preferred: PreferredCreate, db: Session = Depends(get
         preferred (PreferredCreate): The preference data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         Preferred: The newly created preference record.
     """
     db_preferred = PreferredDB(**preferred.model_dump())
@@ -1592,7 +1667,7 @@ async def create_preferred(preferred: PreferredCreate, db: Session = Depends(get
     db.refresh(db_preferred)
     return db_preferred
 
-@app.delete("/preferred/")
+@app.delete("/preferred/", tags=["Preferences"])
 async def delete_preferred(student_id: int, course_id: int, db: Session = Depends(get_db)):
     """
     Delete a student-course preference record from the database.
@@ -1602,7 +1677,7 @@ async def delete_preferred(student_id: int, course_id: int, db: Session = Depend
         course_id (int): The unique identifier of the course.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1620,7 +1695,7 @@ async def delete_preferred(student_id: int, course_id: int, db: Session = Depend
 
 # RECOMMENDATION RESULT ENDPOINTS
 
-@app.get("/recommendation-results", response_model=list[RecommendationResult])
+@app.get("/recommendation-results", response_model=list[RecommendationResult], tags=["Recommendations"])
 async def get_recommendation_results(
     student_id: Optional[int] = None,
     semester: Optional[str] = None,
@@ -1636,7 +1711,7 @@ async def get_recommendation_results(
         year (Optional[int]): Filter by year.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[RecommendationResult]: List of recommendation results.
     """
     query = db.query(RecommendationResultDB)
@@ -1673,7 +1748,7 @@ async def get_recommendation_results(
         formatted_results.append(result_dict)
     return formatted_results
 
-@app.get("/recommendation-results/{result_id}", response_model=RecommendationResult)
+@app.get("/recommendation-results/{result_id}", response_model=RecommendationResult, tags=["Recommendations"])
 async def get_recommendation_result(result_id: int, db: Session = Depends(get_db)):
     """
     Retrieve a recommendation result by its unique ID.
@@ -1682,7 +1757,7 @@ async def get_recommendation_result(result_id: int, db: Session = Depends(get_db
         result_id (int): The unique identifier of the recommendation result.
         db (Session): Database session.
     
-    Return:
+    Output:
         RecommendationResult: The recommendation result's details.
     
     Raises:
@@ -1712,7 +1787,7 @@ async def get_recommendation_result(result_id: int, db: Session = Depends(get_db
         "updated_at": result.updated_at.isoformat() if result.updated_at else None
     }
 
-@app.post("/recommendation-results/", response_model=RecommendationResult)
+@app.post("/recommendation-results/", response_model=RecommendationResult, tags=["Recommendations"])
 async def create_recommendation_result(
     recommendation: RecommendationResultCreate,
     db: Session = Depends(get_db)
@@ -1724,7 +1799,7 @@ async def create_recommendation_result(
         recommendation (RecommendationResultCreate): The recommendation result data to create.
         db (Session): Database session.
     
-    Return:
+    Output:
         RecommendationResult: The newly created recommendation result's details.
     """
     db_recommendation = RecommendationResultDB(**recommendation.model_dump())
@@ -1752,7 +1827,7 @@ async def create_recommendation_result(
         "updated_at": db_recommendation.updated_at.isoformat() if db_recommendation.updated_at else None
     }
 
-@app.put("/recommendation-results/{result_id}", response_model=RecommendationResult)
+@app.put("/recommendation-results/{result_id}", response_model=RecommendationResult, tags=["Recommendations"])
 async def update_recommendation_result(
     result_id: int,
     updated_recommendation: RecommendationResultCreate,
@@ -1766,7 +1841,7 @@ async def update_recommendation_result(
         updated_recommendation (RecommendationResultCreate): The new recommendation result data.
         db (Session): Database session.
     
-    Return:
+    Output:
         RecommendationResult: The updated recommendation result's details.
     
     Raises:
@@ -1801,7 +1876,7 @@ async def update_recommendation_result(
         "updated_at": result.updated_at.isoformat() if result.updated_at else None
     }
 
-@app.delete("/recommendation-results/{result_id}")
+@app.delete("/recommendation-results/{result_id}", tags=["Recommendations"])
 async def delete_recommendation_result(result_id: int, db: Session = Depends(get_db)):
     """
     Delete a recommendation result by its unique ID from the database.
@@ -1810,7 +1885,7 @@ async def delete_recommendation_result(result_id: int, db: Session = Depends(get
         result_id (int): The unique identifier of the recommendation result to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: A message confirming successful deletion.
     
     Raises:
@@ -1831,7 +1906,7 @@ class GenerateRecommendationRequest(BaseModel):
     semester: Optional[str] = 'Fall'
     year: Optional[int] = 2025
 
-@app.post("/recommendations/generate")
+@app.post("/recommendations/generate", tags=["Recommendations"])
 async def generate_recommendations(
     request: GenerateRecommendationRequest,
     db: Session = Depends(get_db)
@@ -1846,7 +1921,7 @@ async def generate_recommendations(
         semester (str): Semester ('Fall', 'Spring', 'Summer')
         year (int): Academic year
     
-    Return:
+    Output:
         dict: Success message and count of recommendations generated
     """
     if generate_recommendations_for_student is None:
@@ -1878,6 +1953,7 @@ async def generate_recommendations(
         db.commit()
         
         # Generate new recommendations
+        print(f"🔍 Generating recommendations for student {request.student_id} with time_preference: '{request.time_preference}'")
         recommendations = generate_recommendations_for_student(
             engine=engine,
             student_id=request.student_id,
@@ -1885,6 +1961,12 @@ async def generate_recommendations(
             current_year=request.year,
             current_semester=request.semester
         )
+        
+        print(f"📊 Generated {len(recommendations) if recommendations else 0} recommendations")
+        if recommendations:
+            # Log first few recommendations to see their section IDs
+            for i, rec in enumerate(recommendations[:3]):
+                print(f"  Rec {i+1}: course_id={rec.get('course_id')}, section_id={rec.get('section_id')}, course_name={rec.get('course_name')}")
         
         if not recommendations:
             return {
@@ -1932,16 +2014,13 @@ async def generate_recommendations(
             "count": saved_count,
             "time_preference": request.time_preference
         }
-        
-    except HTTPException:
-        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error generating recommendations: {str(e)}")
 
 # DRAFT SCHEDULE ENDPOINTS
 
-@app.get("/draft-schedules", response_model=list[DraftSchedule])
+@app.get("/draft-schedules", response_model=list[DraftSchedule], tags=["Draft Schedules"])
 async def get_draft_schedules(
     student_id: Optional[int] = None,
     db: Session = Depends(get_db)
@@ -1953,7 +2032,7 @@ async def get_draft_schedules(
         student_id (Optional[int]): Filter by student ID. If not provided, returns all schedules.
         db (Session): Database session.
     
-    Return:
+    Output:
         list[DraftSchedule]: List of draft schedules with their section IDs.
     """
     query = db.query(DraftScheduleDB)
@@ -1983,7 +2062,7 @@ async def get_draft_schedules(
     return result
 
 
-@app.get("/draft-schedules/{draft_schedule_id}", response_model=DraftSchedule)
+@app.get("/draft-schedules/{draft_schedule_id}", response_model=DraftSchedule, tags=["Draft Schedules"])
 async def get_draft_schedule(
     draft_schedule_id: int,
     db: Session = Depends(get_db)
@@ -1995,7 +2074,7 @@ async def get_draft_schedule(
         draft_schedule_id (int): The ID of the draft schedule.
         db (Session): Database session.
     
-    Return:
+    Output:
         DraftSchedule: The draft schedule with its section IDs.
     
     Raises:
@@ -2024,7 +2103,7 @@ async def get_draft_schedule(
     }
 
 
-@app.post("/draft-schedules/", response_model=DraftSchedule)
+@app.post("/draft-schedules/", response_model=DraftSchedule, tags=["Draft Schedules"])
 async def create_draft_schedule(
     schedule_data: DraftScheduleCreate,
     db: Session = Depends(get_db)
@@ -2036,7 +2115,7 @@ async def create_draft_schedule(
         schedule_data (DraftScheduleCreate): The draft schedule data including student_id, name, and section_ids.
         db (Session): Database session.
     
-    Return:
+    Output:
         DraftSchedule: The newly created draft schedule.
     
     Raises:
@@ -2060,24 +2139,34 @@ async def create_draft_schedule(
                 detail=f"Invalid section IDs: {list(invalid_sections)}"
             )
     
-    # Create draft schedule
-    new_schedule = DraftScheduleDB(
-        student_id=schedule_data.student_id,
-        name=schedule_data.name
-    )
-    db.add(new_schedule)
-    db.flush()  # Get the ID without committing
-    
-    # Add sections to the schedule
-    for section_id in schedule_data.section_ids:
-        schedule_section = DraftScheduleSectionDB(
-            draft_schedule_id=new_schedule.draft_schedule_id,
-            section_id=section_id
+    try:
+        # Create draft schedule
+        new_schedule = DraftScheduleDB(
+            student_id=schedule_data.student_id,
+            name=schedule_data.name
         )
-        db.add(schedule_section)
-    
-    db.commit()
-    db.refresh(new_schedule)
+        db.add(new_schedule)
+        db.flush()  # Get the ID without committing
+        
+        # Add sections to the schedule
+        for section_id in schedule_data.section_ids:
+            schedule_section = DraftScheduleSectionDB(
+                draft_schedule_id=new_schedule.draft_schedule_id,
+                section_id=section_id
+            )
+            db.add(schedule_section)
+        
+        db.commit()
+        db.refresh(new_schedule)
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error creating draft schedule: {str(e)}")
     
     return {
         "draft_schedule_id": new_schedule.draft_schedule_id,
@@ -2089,7 +2178,7 @@ async def create_draft_schedule(
     }
 
 
-@app.put("/draft-schedules/{draft_schedule_id}", response_model=DraftSchedule)
+@app.put("/draft-schedules/{draft_schedule_id}", response_model=DraftSchedule, tags=["Draft Schedules"])
 async def update_draft_schedule(
     draft_schedule_id: int,
     schedule_data: DraftScheduleUpdate,
@@ -2103,7 +2192,7 @@ async def update_draft_schedule(
         schedule_data (DraftScheduleUpdate): The updated schedule data.
         db (Session): Database session.
     
-    Return:
+    Output:
         DraftSchedule: The updated draft schedule.
     
     Raises:
@@ -2166,7 +2255,7 @@ async def update_draft_schedule(
     }
 
 
-@app.delete("/draft-schedules/{draft_schedule_id}")
+@app.delete("/draft-schedules/{draft_schedule_id}", tags=["Draft Schedules"])
 async def delete_draft_schedule(
     draft_schedule_id: int,
     db: Session = Depends(get_db)
@@ -2178,7 +2267,7 @@ async def delete_draft_schedule(
         draft_schedule_id (int): The ID of the draft schedule to delete.
         db (Session): Database session.
     
-    Return:
+    Output:
         dict: Success message.
     
     Raises:
@@ -2307,7 +2396,7 @@ class StatisticsResponse(BaseModel):
     course_difficulty_performance: List[CourseDifficultyPerformance]
     semester_performance_heatmap: List[SemesterPerformanceHeatmap]
 
-@app.get("/statistics/{student_id}", response_model=StatisticsResponse)
+@app.get("/statistics/{student_id}", response_model=StatisticsResponse, tags=["Statistics"])
 async def get_student_statistics(
     student_id: int,
     db: Session = Depends(get_db)
@@ -2328,7 +2417,7 @@ async def get_student_statistics(
         student_id (int): The student ID to get statistics for.
         db (Session): Database session.
     
-    Return:
+    Output:
         StatisticsResponse: All statistics for the student.
     
     Raises:
@@ -2551,7 +2640,7 @@ async def get_student_statistics(
                     return "afternoon"
                 else:
                     return "evening"
-            except:
+            except (ValueError, IndexError):
                 return "unknown"
         
         time_slot_performance = {"morning": [], "afternoon": [], "evening": []}
@@ -2723,7 +2812,6 @@ async def get_student_statistics(
             semester_performance_heatmap=semester_heatmap
         )
     except HTTPException:
-        # Re-raise HTTP exceptions (like 404)
         raise
     except Exception as e:
         # Log the error and return 500
