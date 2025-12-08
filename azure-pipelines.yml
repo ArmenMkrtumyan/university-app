@@ -57,6 +57,7 @@ stages:
               repository: $(imageRepository)-api
               dockerfile: '$(dockerfilePath)/api/Dockerfile'
               containerRegistry: $(dockerRegistryServiceConnection)
+              buildContext: '$(dockerfilePath)'
               tags: |
                 $(tag)
                 latest
@@ -94,10 +95,7 @@ stages:
                     azureSubscription: 'Azure-Subscription'
                     appName: '$(apiAppName)'
                     containers: '$(containerRegistry)/$(imageRepository)-api:$(tag)'
-                    appSettings: |
-                      -DATABASE_URL $(DATABASE_URL)
-                      -PYTHONUNBUFFERED 1
-                      -PYTHONDONTWRITEBYTECODE 1
+                    appSettings: '-DATABASE_URL $(DATABASE_URL) -PYTHONUNBUFFERED 1 -PYTHONDONTWRITEBYTECODE 1'
                 
                 # Deploy Frontend to Azure App Service (Free tier)
                 - task: AzureWebAppContainer@1
