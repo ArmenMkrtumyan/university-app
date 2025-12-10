@@ -10,6 +10,13 @@ Full-stack application for managing university courses, students, and schedules.
 - **ETL**: Python scripts for data generation and loading
 - **Documentation**: MkDocs
 
+## Live Deployment (Azure)
+
+The application is deployed and available at:
+
+- **Frontend**: [https://api-frontend-armen.azurewebsites.net](https://api-frontend-armen.azurewebsites.net)
+- **API Documentation**: [https://api-armen-2025.azurewebsites.net/docs](https://api-armen-2025.azurewebsites.net/docs)
+
 ## Quick Start
 
 1. **Clone and navigate:**
