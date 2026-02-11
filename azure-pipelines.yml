@@ -30,6 +30,11 @@ variables:
   # Image tags
   dockerfilePath: '$(Build.SourcesDirectory)/university_app'
   tag: '$(Build.BuildId)'
+  
+  # Database connection - Update this with your actual PostgreSQL connection string
+  # Format: postgresql://username:password@host:port/database
+  # You can get this from Azure Portal -> Container Instances -> university-postgres -> Connect
+  DATABASE_URL: 'postgresql://postgres:very_secure_password@university-postgres.afabckgdgwfqh4dj.belgiumcentral.azurecontainer.io:5432/university_db'
 
 stages:
   - stage: Build
@@ -62,11 +67,11 @@ stages:
                 $(tag)
                 latest
 
-          # Build and push Frontend image
+          # Build Frontend image (separate build step to support build args)
           - task: Docker@2
-            displayName: 'Build and Push Frontend Image'
+            displayName: 'Build Frontend Image'
             inputs:
-              command: buildAndPush
+              command: build
               repository: $(imageRepository)-app
               dockerfile: '$(dockerfilePath)/app/Dockerfile'
               containerRegistry: $(dockerRegistryServiceConnection)
@@ -75,6 +80,17 @@ stages:
                 $(tag)
                 latest
               arguments: '--build-arg VITE_API_URL=https://$(apiAppName).azurewebsites.net'
+          
+          # Push Frontend image
+          - task: Docker@2
+            displayName: 'Push Frontend Image'
+            inputs:
+              command: push
+              repository: $(imageRepository)-app
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
 
   - stage: Deploy
     displayName: 'Deploy to Azure (Free Tier)'
@@ -88,24 +104,80 @@ stages:
           runOnce:
             deploy:
               steps:
-                # Deploy API to Azure App Service (Free tier)
-                - task: AzureWebAppContainer@1
-                  displayName: 'Deploy API to Azure App Service'
+                # Configure Container Registry authentication and deploy API
+                - task: AzureCLI@2
+                  displayName: 'Configure API Container Registry Auth and Deploy'
                   inputs:
                     azureSubscription: 'Azure-Subscription'
-                    appName: '$(apiAppName)'
-                    containers: '$(containerRegistry)/$(imageRepository)-api:$(tag)'
-                    appSettings: '-DATABASE_URL $(DATABASE_URL) -PYTHONUNBUFFERED 1 -PYTHONDONTWRITEBYTECODE 1'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Enable Admin user on Container Registry
+                      az acr update --name $(ACR_NAME) --admin-enabled true --output none
+                      
+                      # Get Container Registry credentials
+                      ACR_USERNAME=$(az acr credential show --name $(ACR_NAME) --query "username" -o tsv)
+                      ACR_PASSWORD=$(az acr credential show --name $(ACR_NAME) --query "passwords[0].value" -o tsv)
+                      ACR_LOGIN_SERVER=$(az acr show --name $(ACR_NAME) --query "loginServer" -o tsv)
+                      
+                      # Configure API App Service with Container Registry authentication
+                      az webapp config container set \
+                        --resource-group university-app-rg \
+                        --name $(apiAppName) \
+                        --docker-custom-image-name "${ACR_LOGIN_SERVER}/$(imageRepository)-api:latest" \
+                        --docker-registry-server-url "https://${ACR_LOGIN_SERVER}" \
+                        --docker-registry-server-user "$ACR_USERNAME" \
+                        --docker-registry-server-password "$ACR_PASSWORD" \
+                        --output none
+                      
+                      # Set application settings
+                      az webapp config appsettings set \
+                        --resource-group university-app-rg \
+                        --name $(apiAppName) \
+                        --settings \
+                          DATABASE_URL="$(DATABASE_URL)" \
+                          PYTHONUNBUFFERED=1 \
+                          PYTHONDONTWRITEBYTECODE=1 \
+                          WEBSITES_PORT=8000 \
+                          WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+                        --output none
+                      
+                      # Restart to pull new image
+                      az webapp restart --resource-group university-app-rg --name $(apiAppName) --output none
                 
-                # Deploy Frontend to Azure App Service (Free tier)
-                - task: AzureWebAppContainer@1
-                  displayName: 'Deploy Frontend to Azure App Service'
+                # Configure Container Registry authentication and deploy Frontend
+                - task: AzureCLI@2
+                  displayName: 'Configure Frontend Container Registry Auth and Deploy'
                   inputs:
                     azureSubscription: 'Azure-Subscription'
-                    appName: '$(frontendAppName)'
-                    containers: '$(containerRegistry)/$(imageRepository)-app:$(tag)'
-                    appSettings: |
-                      -VITE_API_URL https://$(apiAppName).azurewebsites.net
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Get Container Registry credentials (already enabled above)
+                      ACR_USERNAME=$(az acr credential show --name $(ACR_NAME) --query "username" -o tsv)
+                      ACR_PASSWORD=$(az acr credential show --name $(ACR_NAME) --query "passwords[0].value" -o tsv)
+                      ACR_LOGIN_SERVER=$(az acr show --name $(ACR_NAME) --query "loginServer" -o tsv)
+                      
+                      # Configure Frontend App Service with Container Registry authentication
+                      az webapp config container set \
+                        --resource-group university-app-rg \
+                        --name $(frontendAppName) \
+                        --docker-custom-image-name "${ACR_LOGIN_SERVER}/$(imageRepository)-app:latest" \
+                        --docker-registry-server-url "https://${ACR_LOGIN_SERVER}" \
+                        --docker-registry-server-user "$ACR_USERNAME" \
+                        --docker-registry-server-password "$ACR_PASSWORD" \
+                        --output none
+                      
+                      # Set application settings
+                      az webapp config appsettings set \
+                        --resource-group university-app-rg \
+                        --name $(frontendAppName) \
+                        --settings \
+                          WEBSITES_PORT=80 \
+                        --output none
+                      
+                      # Restart to pull new image
+                      az webapp restart --resource-group university-app-rg --name $(frontendAppName) --output none
 
                 - script: |
                     echo "## Deployment Complete!"
@@ -113,4 +185,5 @@ stages:
                     echo "API URL: https://$(apiAppName).azurewebsites.net"
                     echo "API Docs: https://$(apiAppName).azurewebsites.net/docs"
                   displayName: 'Display Deployment URLs'
+
 
